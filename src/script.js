@@ -30,8 +30,17 @@
 // この3つを生成してステージを作る
 
 // さてと・・
+// そろそろGitHubに移行するかな。。
+// とりあえず枠組みはできた。あとは・・んー。
+// ゲージを用意する。長さは100くらいで。
+// 光に当たるとスリップダメージ。値は明るさそのまんまでいいと思う。
+// ゲージどこに置こう・・左上かなぁ。小さめに。
 
-let effectShader;
+// 敵のアイデアとしては特定の長方形の周りを周回するとか
+// そういうので
+// 画面の外周の2ヶ所を開けておいてそこを伝って次のステージに行くみたいな
+// しかし640,640だとすぐ終わっちゃいそう・・迷路っぽくするとか？
+// rectをたくさん用意するとかそういうの。
 
 let vsLight =
 "precision mediump float;" +
@@ -227,7 +236,7 @@ function setup() {
   createCanvas(640, 640);
   //noStroke();
   mySystem = new System();
-  mySystem.setPattern();
+  mySystem.roomInitialize();
 }
 
 function draw() {
@@ -350,6 +359,9 @@ class SimpleCrossReferenceArray extends Array{
   }
 }
 
+// ------------------------------------------------------------ //
+// obstacle.
+
 // 正方形や円。StageDataのdistFunctionを構成する要素。
 // 衝突判定の構成要素を作る感じ。そう。
 // 色により性質が異なる感じで。
@@ -437,6 +449,9 @@ class SquareObstacle extends Obstacle{
   }
 }
 
+// ------------------------------------------------------------------ //
+// player.
+
 // プレイヤー。十字キーとスペースキーで操作。
 class Player{
   constructor(){
@@ -467,6 +482,9 @@ class Player{
     if(abs(this.nextPosition.x) > 0.98 || abs(this.nextPosition.y) > 0.98){ return false; }
     return distFunction(this.nextPosition) > 0.02;
   }
+  isAlive(){
+    return this.alive;
+  }
   draw(gr){
     if(!this.alive){ return; } // 死んだ！
     const x = (this.position.x + 1.0) * 0.5 * width;
@@ -481,6 +499,9 @@ class Player{
     gr.noStroke();
   }
 }
+
+// ---------------------------------------------------------------- //
+// enemy.
 
 // エネミーアイ。光を発する。発するタイミングや移動パターンなど。
 // 増やす・・？
@@ -531,6 +552,9 @@ class EnemyEye{
   }
 }
 
+// ---------------------------------------------------------------- //
+// system.
+
 // ゲームシステム
 // WEBGLで扱う光源の照射範囲のグラフィックも内蔵。
 class System{
@@ -545,17 +569,31 @@ class System{
     this._particleArray = new SimpleCrossReferenceArray();
     this._properFrameCount = 0;
 
+    this._fade = new Fade(60, 120); // fade関連はコンポジットで。
+
     this.currentShader = undefined;
     this.lightShaders = {};
+
+    this.roomSet = [room0];
+    this.roomNumber = 0; // ここが1とか2とかになるという・・
   }
-  shaderReset(shaderName){
+  shaderReset(obs, shaderName){
+    distFuncDescription = createDistFuncDescription(obs);
+    if(!this.lightShaders[shaderName]){
+      fsLight = fsLightUpper + distFuncDescription + fsLightLower;
+      this.lightShaders.shader0 = this._lightEffect.createShader(vsLight, fsLight);
+    }
     this.currentShader = this.lightShaders[shaderName];
     this._lightEffect.shader(this.currentShader);
+    distFunction = createDistFunction(obs);
   }
-  setPattern(){
-    pattern0();
+  roomInitialize(){
+    this.roomSet[this.roomNumber]();
+    this._fade.setFadeInFlag(true);
+    this._properFrameCount = 0;
   }
   registEyes(_eyes){
+    this.eyes.clear();
     this.eyes.addMulti(_eyes);
   }
   setUniform(){
@@ -586,6 +624,13 @@ class System{
     this._particleArray.loopReverse("update");
     this._particleArray.loopReverse("eject");
     this._properFrameCount++;
+    this.check(); // fadeOut→initializeの流れ
+  }
+  check(){
+    // プレイヤー死んでてfadeOut終わってたら戻す。
+    if(!this._player.isAlive() && !this._fade.getFadeOutFlag()){
+      this.roomInitialize();
+    }
   }
   calcDamage(eye){
     const pPos = this._player.position;
@@ -606,6 +651,8 @@ class System{
     if(p5.Vector.dist(cur, ePos) > l && p5.Vector.dot(ray, lVector) > lRange && this._player.alive == true){
       this._player.alive = false;
       this.createParticle(60, 4, 40);
+      //this.fadeOutCount = 1;
+      this._fade.setFadeOutFlag(true);
     }
   }
   createParticle(life, speed, count){
@@ -621,12 +668,75 @@ class System{
     this.setUniform();
     this._lightEffect.quad(-1, -1, -1, 1, 1, 1, 1, -1);
     gr.image(this._lightEffect, 0, 0);
+
     this._player.draw(gr);
     this.eyes.loop("draw", [gr])
     this._particleArray.loop("draw", [gr]);
+
+    this._fade.fadeIn(gr);
+    this._fade.fadeOut(gr);
+
     image(gr, 0, 0);
   }
 }
+
+// 再利用しやすいようにしました。
+// fadeInLimitとfadeOutLimitを設定します。
+// fadeInLimitでfadeInしてfadeOutLimitでfadeOut,なんですが、
+// その間に何かしたいかもしれないということで簡単なイージングを・・
+// 多分イージングの方がいいのでしょうね・・むぅ。
+// fadeInEasing, fadeOutEasingとか。まあわかりにくいですからね。
+class Fade{
+  constructor(fadeInLimit = 60, fadeOutLimit = 120, fadeInRatio = 1.0, fadeOutRatio = 0.5){
+    this.fadeInFlag = false;
+    this.fadeInCount = 0;
+    this.fadeInLimit = fadeInLimit;
+    this.fadeInRatio = fadeInRatio;
+    this.fadeOutFlag = false;
+    this.fadeOutCount = 0;
+    this.fadeOutLimit = fadeOutLimit;
+    this.fadeOutRatio = fadeOutRatio;
+  }
+  setFadeInFlag(flag){ this.fadeInFlag = flag; }
+  getFadeInFlag(){ return this.fadeInFlag; }
+  fadeIn(gr){
+    if(!this.fadeInFlag){ return; }
+    if(this.fadeInCount < this.fadeInLimit * this.fadeInRatio){
+      let prg = this.fadeInCount / (this.fadeInLimit * this.fadeInRatio);
+      prg = prg * prg * (3 - 2 * prg);
+      gr.background(0, 255 * (1 - prg));
+    }
+    this.fadeInCount++;
+    if(this.fadeInCount > this.fadeInLimit){
+      this.fadeInReset();
+    }
+  }
+  fadeInReset(){
+    this.fadeInFlag = false;
+    this.fadeInCount = 0;
+  }
+  fadeOutReset(){
+    this.fadeOutFlag = false;
+    this.fadeOutCount = 0;
+  }
+  setFadeOutFlag(flag){ this.fadeOutFlag = flag; }
+  getFadeOutFlag(){ return this.fadeOutFlag; }
+  fadeOut(gr){
+    if(!this.fadeOutFlag){ return; }
+    if(this.fadeOutCount > this.fadeOutLimit * (1 - this.fadeOutRatio)){
+      let prg = (this.fadeOutLimit - this.fadeOutCount) / (this.fadeOutLimit * this.fadeOutRatio);
+      prg = prg * prg * (3 - 2 * prg);
+      gr.background(0, 255 * (1 - prg));
+    }
+    this.fadeOutCount++;
+    if(this.fadeOutCount > this.fadeOutLimit){
+      this.fadeOutReset();
+    }
+  }
+}
+
+// ------------------------------------------------------------ //
+// pattern.
 
 // distFunctionをどうするか。
 // とりあえずObstacle作ったので・・
@@ -643,7 +753,8 @@ class System{
 // ある場合はそこから取るわけね
 // distFunctionの作成
 // おわり！
-function pattern0(){
+// eyesの行動パターン登録を・・
+function room0(){
   let eyes = [];
   eyes.push(new EnemyEye(0.0, 0.0, TAU / 295, 0.65, 0.05, 255, 128, 0));
   eyes[0].setMoveFunc((c, pos) => {
@@ -653,23 +764,21 @@ function pattern0(){
   eyes[1].setMoveFunc((c, pos) => {
     pos.set(-0.5, -0.3+0.3*Math.sin(TAU * c / 360));
   });
-  mySystem.registEyes(eyes); // これはあとで
-  mySystem._player.initialize(0.4, 0.8);
-  // Obstacleを作る感じ
+  mySystem.registEyes(eyes);
 
+  // Player.
+  mySystem._player.initialize(0.4, 0.8);
+
+  // Obstacles.
   let obs = [];
   obs.push(new CircleObstacle(0, -0.3, 0.6, 0.2));
   obs.push(new RectObstacle(1, 0.4, -0.4, 0.3, 0.2));
   obs.push(new SquareObstacle(2, 0.4, 0.5, 0.35));
   obs.push(new SegmentObstacle(3, -0.8, 0.0, PI*0.5, 0.1, 0.3));
   obs.push(new SquareObstacle(4, -0.1, -0.4, 0.4));
-  distFuncDescription = createDistFuncDescription(obs);
-  if(!mySystem.lightShaders.shader0){
-    fsLight = fsLightUpper + distFuncDescription + fsLightLower;
-    mySystem.lightShaders.shader0 = mySystem._lightEffect.createShader(vsLight, fsLight);
-  }
-  mySystem.shaderReset("shader0"); // これはあとで
-  distFunction = createDistFunction(obs); // これも今は難しいわね・・
+
+  // 処理は簡潔に。
+  mySystem.shaderReset(obs, "shader0");
 }
 
 function createDistFuncDescription(obs){
