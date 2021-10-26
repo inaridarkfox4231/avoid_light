@@ -1,3 +1,7 @@
+// 光の下では生きていけない
+// 光がないと出口が見えない
+// そんな感じですかね
+
 // これをもとに2DshaderTemplate充実させたいわね
 
 // 2Dにする
@@ -53,6 +57,22 @@
 // 要するにモノクロが照らされて明るくなるイメージ？いいんじゃない？
 // ゴールが照らされて見えるようになるってわけね。
 
+// はい。
+// TODO大きく分けて3つ。
+// 1.ゴールして次のエリアに進む仕様を作る
+// 2.ダメージをスリップ仕様にする（MAX100とか120くらいでダメージは
+//   bltの値をそのまま使う感じ）
+// 3.room0とかroom1とかそこら辺の情報を左上に用意
+// こんなもんかな
+// 優先順位的に1→2→3、ていうか2と3は簡単でしょ・・
+
+// やっぱりデフォは0で・・見えちゃうと意味がないし。
+
+// 穴に落ちたらアニメーション、で、フェードアウト。
+// で、HPとかリセットして、roomのナンバーを進めて次のステージ作る。
+
+const DEFAULT_FLOOR_ALPHA = 0.0; // 床をみえるようにする（テスト用）
+
 let vsLight =
 "precision mediump float;" +
 "attribute vec3 aPosition;" +
@@ -72,6 +92,8 @@ let fsLightUpper =
 "uniform vec2 u_lightDirection[4];" + // 光の出る方向
 "uniform float u_lightRange[4];" + // 1.0～-1.0のコサイン値の限界値で範囲制限
 "uniform float u_lightHue[4];" + // 光の色
+"uniform float u_DEFAULT_FLOOR_ALPHA;" + // デバッグ用の床の透明度
+"uniform vec2 u_seed;" + // 模様のためのシード値
 // 定数
 "const float pi = 3.14159;" +
 "const float TAU = atan(1.0) * 8.0;" +
@@ -176,20 +198,8 @@ let fsLightUpper =
 "  rgb = rgb * rgb * (3.0 - 2.0 * rgb);" +
 "  return c.z * mix(vec3(1.0), rgb, c.y);" +
 "}";
-// 距離関数
-let distFuncDescription =
-"float getDist(vec2 p){" +
-"  float d0 = circle(p, vec2(-0.3, 0.6), 0.2);" +
-"  float d1 = rect(p, vec2(0.4, -0.4), vec2(0.3, 0.2));" +
-"  float d2 = square(p, vec2(0.4, 0.5), 0.35);" +
-"  float d3 = segment(p, vec2(-0.8, 0.0), vec2(0.0, 1.0), 0.1, 0.3);" +
-"  float d4 = square(p, vec2(-0.1, -0.4), 0.4);" +
-"  float result = 99999.0;" +
-"  result = min(result, min(d0, d1));" +
-"  result = min(result, min(d2, d3));" +
-"  result = min(result, d4);" +
-"  return result;" +
-"}";
+// 距離関数（ここにはもう何も書かない）
+let distFuncDescription = "";
 let fsLightLower =
 // レイマーチングで光の当たる範囲の色を設定
 "void calcLightArea(vec2 p, out vec4 col, vec2 eye, vec2 lightDirection, float lightRange, float lightHue){" +
@@ -218,20 +228,28 @@ let fsLightLower =
 "      float prg = 1.0 - (l - reach) / 0.03;" +
 "      blt *= prg * prg * (3.0 - 2.0 * prg);" +
 "      col.rgb += getRGB(lightHue, 1.0, blt);" +
-"      col.a += 0.4;" +
+"      col.a += 0.25;" +
 "    }" +
 "  }" +
 "}" +
 // 背景、雑に・・
 // なんかわかんないけどモノクロの背景に色がつくみたいな展開に
 // なってしまったのでそれでいきます
-// 照らされないとゴールが見えない！！！！s
+// 照らされないとゴールが見えない！！！！
+// 一応説明すると-7.0,6.0となっているところがその、ゴールで、
+// 他のマスはそれより明るいですね。つまりひとつだけ暗いマスがあって
+// そこに落ちればクリアというわけ。クリアの仕組み作ってないけど。
 "vec4 getBG(vec2 p){" +
 "  p *= 8.0;" +
+"  if(floor(p.x) == -7.0 && floor(p.y) == 6.0){" +
+"    return vec4(vec3(0.0), u_DEFAULT_FLOOR_ALPHA);" +
+"  }" +
+"  vec2 q = floor(p + 32.0) / 64.0;" +
 "  p = fract(p);" +
-"  p = 2.0 * abs(p - vec2(0.5));" +
-"  float m = max(p.x, p.y);" +
-"  return vec4(vec3(m), 0.1);" +
+"  p = floor(p * 5.0);" +
+"  float rdm = abs(sin(q.x * p.x * u_seed.x + q.y * p.y * u_seed.y));" +
+"  vec3 col = vec3(0.1+floor(rdm * 16.0) / 16.0);" +
+"  return vec4(col, u_DEFAULT_FLOOR_ALPHA);" +
 "}" +
 "void main(){" +
 "  vec2 p = (gl_FragCoord.xy * 2.0 - u_resolution.xy) / min(u_resolution.x, u_resolution.y);" +
@@ -241,7 +259,7 @@ let fsLightLower =
 "  float d = getDist(p);" +
 "  if(d < 0.0){" +
 "  d = max(d, -1.0);" +
-"    col.rgb = (1.0 + d * 10.0) * vec3(0.5) - 10.0 * d * vec3(1.0);" +
+"    col.rgb = (1.0 + d * 10.0) * blue - 10.0 * d * vec3(1.0);" +
 "  }" +
 // eyeが増えることを想定してメソッド化
 // 増やし方はあのシェーダを参考に・・
@@ -263,8 +281,6 @@ let fsLight = fsLightUpper + distFuncDescription + fsLightLower;
 let mySystem;
 
 let distFunction = () => {};
-
-const THRESHOLD = 0.001; // レイマーチングのしきい値
 
 function setup() {
   createCanvas(640, 640);
@@ -610,6 +626,14 @@ class System{
 
     this.roomSet = [room0];
     this.roomNumber = 0; // ここが1とか2とかになるという・・
+    this.floorPatternSeed = [0, 0];
+
+    this.clearFlag = false;
+    this.gameoverFlag = false;
+    this.goalPos = createVector(); // ゴールの正方形の中心
+    // クリア判定はこのポイントに触れたときとする（大きさが）
+    // つまり正方形に触れるのではなく中心にちゃんと来ないとだめ
+    // シェーダー側でこれを中心に正方形、で、vec4(0.0)にする。
   }
   shaderReset(obs, shaderName){
     distFuncDescription = createDistFuncDescription(obs);
@@ -620,6 +644,8 @@ class System{
     this.currentShader = this.lightShaders[shaderName];
     this._lightEffect.shader(this.currentShader);
     distFunction = createDistFunction(obs);
+    this.floorPatternSeed[0] = Math.random() * 9999;
+    this.floorPatternSeed[1] = Math.random() * 9999;
   }
   roomInitialize(){
     this.roomSet[this.roomNumber]();
@@ -650,6 +676,8 @@ class System{
     // 配列の形でないとデフォで0が入っちゃう仕様みたいですね。
     sh.setUniform("u_lightRange", eyelRangeData);
     sh.setUniform("u_lightHue", eyelHueData);
+    sh.setUniform("u_DEFAULT_FLOOR_ALPHA", DEFAULT_FLOOR_ALPHA);
+    sh.setUniform("u_seed", this.floorPatternSeed);
   }
   update(){
     this.eyes.loop("update");
@@ -658,15 +686,32 @@ class System{
     this._particleArray.loopReverse("update");
     this._particleArray.loopReverse("eject");
     this._properFrameCount++;
-    this.check(); // fadeOut→initializeの流れ
+    this.clearCheck();
+    this.gameOverCheck(); // fadeOut→initializeの流れ
   }
-  check(){
+  clearCheck(){
+    // プレイヤー生きててゴールに触れたならフェードアウトを開始して
+    // なおかつクリアフラグを立てる
+    // クリアフラグ立っててフェードアウト終わってるなら
+    // ルームナンバーを更新して次のステージをスタートさせる
+    // フラグを立てるのはその間にメッセージ出したいから
+  }
+  gameOverCheck(){
+    // ゆくゆくはこっちでkillの処理をする感じね
+    // calcDamageは文字通りダメージを計算してHPに反映させるだけ
+    // それが0になったらこっちでアウトの判定（というかaliveを
+    // falseにする処理をplayer側で行う感じね）
+    // んでフェードアウトを開始してgameoverFlagをON
+    // なおフラグを立てるのはその間になんかメッセージ出したいから
+    // そして↓
     // プレイヤー死んでてfadeOut終わってたら戻す。
     if(!this._player.isAlive() && !this._fade.getFadeOutFlag()){
       this.roomInitialize();
     }
   }
   calcDamage(eye){
+    // クリアフラグが立ってるならダメージを受けないように
+    // しないといけない
     const pPos = this._player.position;
     const ePos = eye.position;
     const ray = p5.Vector.sub(pPos, ePos).normalize();
@@ -683,11 +728,14 @@ class System{
     const lVector = createVector(Math.cos(lDir), Math.sin(lDir));
     const lRange = eye.lightRange;
     if(p5.Vector.dist(cur, ePos) > l && p5.Vector.dot(ray, lVector) > lRange && this._player.alive == true){
-      this._player.alive = false;
-      this.createParticle(60, 4, 40);
-      //this.fadeOutCount = 1;
-      this._fade.setFadeOutFlag(true);
+      this.kill(); // 殺す処理
     }
+  }
+  kill(){
+    this._player.alive = false;
+    this.createParticle(60, 4, 40);
+    //this.fadeOutCount = 1;
+    this._fade.setFadeOutFlag(true);
   }
   createParticle(life, speed, count){
     const size = 12;  // やられる時は0.7, ダメージ時は2.0で。
@@ -709,6 +757,9 @@ class System{
 
     this._fade.fadeIn(gr);
     this._fade.fadeOut(gr);
+
+    // フェードインの間にルームナンバー出した方がよさそうならその処理
+    // クリアフラグやゲームオーバーフラグが立ってるならなんか出す
 
     image(gr, 0, 0);
   }
@@ -792,7 +843,7 @@ function room0(){
   let eyes = [];
   eyes.push(new EnemyEye(0.0, 0.0, TAU / 295, 0.65, 0.05, 255, 128, 0));
   eyes[0].setMoveFunc((c, pos) => {
-    pos.set(0.65 * Math.sin(TAU * c / 360), 0.0);
+    pos.set(0.5 * Math.sin(TAU * c / 360), 0.0);
   });
   eyes.push(new EnemyEye(0.0, 0.0, TAU / 180, 0.99, 0.35, 128, 255, 0));
   eyes[1].setMoveFunc((c, pos) => {
@@ -808,11 +859,21 @@ function room0(){
   obs.push(new CircleObstacle(0, -0.3, 0.6, 0.2));
   obs.push(new RectObstacle(1, 0.4, -0.4, 0.3, 0.2));
   obs.push(new SquareObstacle(2, 0.4, 0.5, 0.35));
-  obs.push(new SegmentObstacle(3, -0.8, 0.0, PI*0.5, 0.1, 0.3));
+  obs.push(new SegmentObstacle(3, -0.7, 0.0, PI*0.5, 0.1, 0.3));
   obs.push(new SquareObstacle(4, -0.1, -0.4, 0.4));
+
+  createWall(5, obs); // 壁を作る
 
   // 処理は簡潔に。
   mySystem.shaderReset(obs, "shader0");
+}
+
+// 外周を作るのは処理を再利用しましょうね
+function createWall(startIndex, obs){
+  obs.push(new RectObstacle(startIndex, 0.0, 31.0/32.0, 2.0, 1.0 / 16.0));
+  obs.push(new RectObstacle(startIndex+1, 0.0, -31.0/32.0, 2.0, 1.0 / 16.0));
+  obs.push(new RectObstacle(startIndex+2, 31.0/32.0, 0.0, 1.0 / 16.0, 2.0));
+  obs.push(new RectObstacle(startIndex+3, -31.0/32.0, 0.0, 1.0 / 16.0, 2.0));
 }
 
 function createDistFuncDescription(obs){
@@ -823,7 +884,7 @@ function createDistFuncDescription(obs){
   }
   // 距離を返す部分
   let lowerPart = "  float result = 99999.0;";
-  for(let i = 0; i < obs.length * 0.5; i++){
+  for(let i = 0; i < obs.length - (obs.length % 2); i += 2){
     lowerPart += "  result = min(result, min(d" + i.toString() + ", d" + (i+1).toString() + "));";
   }
   if(obs.length % 2 == 1){
@@ -831,7 +892,6 @@ function createDistFuncDescription(obs){
   }
   lowerPart += "  return result;";
   lowerPart += "}";
-
   return upperPart + lowerPart;
 }
 
