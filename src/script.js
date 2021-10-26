@@ -42,6 +42,17 @@
 // しかし640,640だとすぐ終わっちゃいそう・・迷路っぽくするとか？
 // rectをたくさん用意するとかそういうの。
 
+// 周囲の壁を用意
+// 床を用意
+// 床は照らされたところだけ見えるようにする
+// 当然ゴールも見えない
+// って感じですかね・・
+// あとroundBoxとか追加したいわね。
+
+// なんか予想と違うけどいいや
+// 要するにモノクロが照らされて明るくなるイメージ？いいんじゃない？
+// ゴールが照らされて見えるようになるってわけね。
+
 let vsLight =
 "precision mediump float;" +
 "attribute vec3 aPosition;" +
@@ -195,25 +206,48 @@ let fsLightLower =
 "      cur += d * ray;" +
 "    }" +
 "    l = length(p - eye);" +
-"    if(length(cur - eye) > l && dot(ray, lightDirection) > lightRange){" +
-"      float blt = 0.5 / (l*l + 0.5);" +
+"    float reach = length(cur - eye);" +
+"    float blt = 0.5 / (l*l + 0.5);" +
+// まあでもなんかに使えそうだから残しておこう。
+"    if(reach > l && dot(ray, lightDirection) - lightRange > 0.0){" +
+"      float lightPrg = (dot(ray, lightDirection) - lightRange) / (1.0 - lightRange);" +
+"      blt *= lightPrg * lightPrg * (3.0 - 2.0 * lightPrg);" +
 "      col.rgb += getRGB(lightHue, 1.0, blt);" +
+"      col.a += 0.5;" +
+"    }else if(reach <= l && l - reach < 0.03){" +
+"      float prg = 1.0 - (l - reach) / 0.03;" +
+"      blt *= prg * prg * (3.0 - 2.0 * prg);" +
+"      col.rgb += getRGB(lightHue, 1.0, blt);" +
+"      col.a += 0.4;" +
 "    }" +
 "  }" +
 "}" +
+// 背景、雑に・・
+// なんかわかんないけどモノクロの背景に色がつくみたいな展開に
+// なってしまったのでそれでいきます
+// 照らされないとゴールが見えない！！！！s
+"vec4 getBG(vec2 p){" +
+"  p *= 8.0;" +
+"  p = fract(p);" +
+"  p = 2.0 * abs(p - vec2(0.5));" +
+"  float m = max(p.x, p.y);" +
+"  return vec4(vec3(m), 0.1);" +
+"}" +
 "void main(){" +
 "  vec2 p = (gl_FragCoord.xy * 2.0 - u_resolution.xy) / min(u_resolution.x, u_resolution.y);" +
+"  vec4 bg = getBG(p);" +
 "  vec4 col = vec4(vec3(0.0), 1.0);" +
+"  col = bg;" +
 "  float d = getDist(p);" +
 "  if(d < 0.0){" +
 "  d = max(d, -1.0);" +
-"    col.rgb = (1.0 + d * 10.0) * blue - 10.0 * d * vec3(1.0);" +
+"    col.rgb = (1.0 + d * 10.0) * vec3(0.5) - 10.0 * d * vec3(1.0);" +
 "  }" +
 // eyeが増えることを想定してメソッド化
 // 増やし方はあのシェーダを参考に・・
 "  for(int i = 0; i < 4; i++){" +
 "    if(i < u_eyeCount){" +
-"  calcLightArea(p, col, u_eyePos[i], u_lightDirection[i], u_lightRange[i], u_lightHue[i]);" +
+"      calcLightArea(p, col, u_eyePos[i], u_lightDirection[i], u_lightRange[i], u_lightHue[i]);" +
 "    }" +
 "  }" +
 "  gl_FragColor = col;" +
