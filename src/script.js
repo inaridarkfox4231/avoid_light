@@ -75,8 +75,12 @@
 // 踏んだチェックポイントは光るようにするのもいいわね。
 // ステージ作りやすくしたいわね
 
+// floatをfloorって書いちゃって10分消えた（バカ）
+// しゅいさんの配信聴きながら作業してる（お絵描きしたい）
+
 const DEFAULT_FLOOR_ALPHA = 0.0; // 床をみえるようにする（テスト用）
 const ROOMNUMBER_MAX = 2; // 2の場合0と1があるということです（以下略）
+const GRID = 0.05; // これを使って簡単に位置指定
 
 let vsLight =
 "precision mediump float;" +
@@ -97,8 +101,8 @@ let fsLightUpper =
 "uniform vec2 u_lightDirection[4];" + // 光の出る方向
 "uniform float u_lightRange[4];" + // 1.0～-1.0のコサイン値の限界値で範囲制限
 "uniform float u_lightHue[4];" + // 光の色
-"uniform float u_DEFAULT_FLOOR_ALPHA;" + // デバッグ用の床の透明度
-"uniform vec2 u_seed;" + // 模様のためのシード値
+"uniform float u_default_Floor_Alpha;" + // デバッグ用の床の透明度
+"uniform float u_seed;" + // 模様のためのシード値
 "uniform vec2 u_goalPos;" + // 0.05刻みでゴール指定
 // 定数
 "const float pi = 3.14159;" +
@@ -116,6 +120,12 @@ let fsLightUpper =
 "const vec3 green = vec3(0.3, 0.9, 0.4);" +
 "const vec3 blue = vec3(0.2, 0.25, 0.98);" +
 "const vec3 white = vec3(1.0);" +
+// ランダム関連(seed追加)
+"const vec2 r_vector = vec2(12.9898, 78.233);" +
+"const float r_coeff = 43758.5453123;" +
+"float random(vec2 st, float seed){" +
+"  return fract(sin(dot(st.xy, r_vector)) * r_coeff + seed);" +
+"}" +
 // ベクトル取得関数
 "vec2 fromAngle(float t){ return vec2(cos(t), sin(t)); }" +
 // 正二面体群
@@ -246,13 +256,16 @@ let fsLightLower =
 // 他のマスはそれより明るいですね。つまりひとつだけ暗いマスがあって
 // そこに落ちればクリアというわけ。クリアの仕組み作ってないけど。
 "vec4 getBG(vec2 p){" +
-"  p *= 10.0;" +
-"  vec2 q = floor(p + 40.0) / 80.0;" +
-"  p = fract(p);" +
-"  p = floor(p * 5.0);" +
-"  float rdm = abs(sin(q.x * p.x * u_seed.x + q.y * p.y * u_seed.y));" +
-"  vec3 col = vec3(0.1+floor(rdm * 16.0) / 16.0);" +
-"  return vec4(col, u_DEFAULT_FLOOR_ALPHA);" +
+"  p *= 80.0;" +
+"  p += 80.0;" +
+"  vec3 col = vec3(0.2 + random(floor(p), u_seed));" +
+//"  p *= 10.0;" +
+//"  vec2 q = floor(p + 40.0) / 80.0;" +
+//"  p = fract(p);" +
+//"  p = floor(p * 5.0);" +
+//"  float rdm = abs(sin(q.x * p.x * u_seed.x + q.y * p.y * u_seed.y));" +
+//"  vec3 col = vec3(0.1+floor(rdm * 16.0) / 16.0);" +
+"  return vec4(col, u_default_Floor_Alpha);" +
 "}" +
 // 背景をcolに設定（ゴールだけ別に用意）
 // じゃあこれで。0.05刻みで0.05で落とす。あっちの方も。
@@ -260,7 +273,7 @@ let fsLightLower =
 "void setBackground(vec2 p, out vec4 col, vec4 bg){" +
 "  col = bg;" +
 "  if(abs(p.x - u_goalPos.x) < 0.05 && abs(p.y - u_goalPos.y) < 0.05){" +
-"    col = vec4(vec3(0.0), u_DEFAULT_FLOOR_ALPHA);" +
+"    col = vec4(vec3(0.0), u_default_Floor_Alpha);" +
 "  }" +
 "}" +
 // メインコード
@@ -300,12 +313,6 @@ function setup() {
   //noStroke();
   mySystem = new System();
   mySystem.roomInitialize();
-
-  // 暫定的にテキスト設定
-  textSize(24);
-  textAlign(CENTER, CENTER);
-  fill(255);
-  noStroke();
 }
 
 function draw() {
@@ -458,7 +465,6 @@ class RectObstacle extends Obstacle{
     const dx = abs(p.x - this.center.x) - 0.5 * this.sizeVector.x;
     const dy = abs(p.y - this.center.y) - 0.5 * this.sizeVector.y;
     return max(dx, dy);
-//max(abs(p.x - v21.x) - v22.x * 0.5, abs(p.y - v21.y) - v22.y * 0.5);
   }
   getString(){
     return "  float d" + this.id.toString() + " = rect(p, vec2(" + this.center.x.toString() + ", " + this.center.y.toString() + "), vec2(" + this.sizeVector.x.toString() + ", " + this.sizeVector.y.toString() + "));";
@@ -640,9 +646,15 @@ class System{
     this._player = new Player();
 
     this.baseGraphic = createGraphics(width, height); // ベースもこちらに
+    // ゆくゆくはいくつかサイズ用意して切り替えできるように
+    this.informationLayer = createGraphics(width, height); // 情報いろいろ
+    // 具体的にはクリアとかのメッセージとHPゲージとroomNo.と
+    // HP減るときのゲージアニメでパーティクル出すのもここで
+    this.prepareForInformation();
 
     this._lightEffect = createGraphics(width, height, WEBGL);
     this._lightEffect.pixelDensity(1);
+    // base大きくするならこっちも大きく・・
 
     this._particleArray = new SimpleCrossReferenceArray();
     this._properFrameCount = 0;
@@ -654,7 +666,9 @@ class System{
 
     this.roomSet = [room0, room1];
     this.roomNumber = 0; // ここが1とか2とかになるという・・
-    this.floorPatternSeed = [0, 0];
+    this.floorPatternSeed = 0;
+    this.defaultFloorAlpha = DEFAULT_FLOOR_ALPHA;
+    // ギミックで上げたりしたら面白そう
 
     this.clearFlag = false;
     this.gameoverFlag = false;
@@ -665,6 +679,14 @@ class System{
     // 0.05刻みで指定してくださいそのプラスマイナス0.05で正方形です
     this.goalCheckThreshold = 0.05; // これを増減させてレベルを動かせそう
   }
+  prepareForInformation(){
+    let gr = this.informationLayer;
+    // 暫定的にテキスト設定
+    gr.textSize(24);
+    gr.textAlign(CENTER, CENTER);
+    gr.fill(255);
+    gr.noStroke();
+  }
   shaderReset(obs, shaderName){
     distFuncDescription = createDistFuncDescription(obs);
     if(!this.lightShaders[shaderName]){
@@ -674,8 +696,7 @@ class System{
     this.currentShader = this.lightShaders[shaderName];
     this._lightEffect.shader(this.currentShader);
     distFunction = createDistFunction(obs);
-    this.floorPatternSeed[0] = Math.random() * 9999;
-    this.floorPatternSeed[1] = Math.random() * 9999;
+    this.floorPatternSeed = Math.random() * 9999;
   }
   roomInitialize(nextRoomNumber = 0){
     this.roomNumber = nextRoomNumber;
@@ -710,7 +731,7 @@ class System{
     // 配列の形でないとデフォで0が入っちゃう仕様みたいですね。
     sh.setUniform("u_lightRange", eyelRangeData);
     sh.setUniform("u_lightHue", eyelHueData);
-    sh.setUniform("u_DEFAULT_FLOOR_ALPHA", DEFAULT_FLOOR_ALPHA);
+    sh.setUniform("u_default_Floor_Alpha", this.defaultFloorAlpha);
     sh.setUniform("u_seed", this.floorPatternSeed);
     sh.setUniform("u_goalPos", [this.goalPos.x, this.goalPos.y]);
   }
@@ -822,12 +843,17 @@ class System{
 
     image(gr, 0, 0);
 
+    this.informationLayer.clear();
+    if(this._fade.getFadeInFlag()){
+      this.informationLayer.text("room" + this.roomNumber + ":caption this.", width * 0.5, height * 0.5);
+    }
     if(this.gameoverFlag){
-      text("GAMEOVER...", width * 0.5, height * 0.5);
+      this.informationLayer.text("GAMEOVER...", width * 0.5, height * 0.5);
     }
     if(this.clearFlag){
-      text("CLEAR!", width * 0.5, height * 0.5);
+      this.informationLayer.text("CLEAR!", width * 0.5, height * 0.5);
     }
+    image(this.informationLayer, 0, 0);
   }
 }
 
