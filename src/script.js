@@ -244,7 +244,7 @@ let fsLightLower =
 "      float prg = 1.0 - (l - reach) / 0.03;" +
 "      blt *= prg * prg * (3.0 - 2.0 * prg);" +
 "      col.rgb += getRGB(lightHue, 1.0, blt);" +
-"      col.a += 0.25;" +
+"      col.a += 0.5;" +
 "    }" +
 "  }" +
 "}" +
@@ -259,12 +259,6 @@ let fsLightLower =
 "  p *= 80.0;" +
 "  p += 80.0;" +
 "  vec3 col = vec3(0.2 + random(floor(p), u_seed));" +
-//"  p *= 10.0;" +
-//"  vec2 q = floor(p + 40.0) / 80.0;" +
-//"  p = fract(p);" +
-//"  p = floor(p * 5.0);" +
-//"  float rdm = abs(sin(q.x * p.x * u_seed.x + q.y * p.y * u_seed.y));" +
-//"  vec3 col = vec3(0.1+floor(rdm * 16.0) / 16.0);" +
 "  return vec4(col, u_default_Floor_Alpha);" +
 "}" +
 // 背景をcolに設定（ゴールだけ別に用意）
@@ -455,11 +449,12 @@ class Obstacle{
 }
 
 // 長方形。中心ベクトルとサイズベクトルで4次元。
+// a,b,c,dで(a,b)～(c,d)のあれで。左下と右上。
 class RectObstacle extends Obstacle{
-  constructor(id, cx, cy, w, h){
+  constructor(id, a, b, c, d){
     super(id);
-    this.center = createVector(cx, cy);
-    this.sizeVector = createVector(w, h); // 横幅と縦幅
+    this.center = createVector((a + c) * 0.5 * GRID, (b + d) * 0.5 * GRID);
+    this.sizeVector = createVector(abs(a - c) * GRID, abs(b - d) * GRID); // 横幅と縦幅
   }
   getDist(p){
     const dx = abs(p.x - this.center.x) - 0.5 * this.sizeVector.x;
@@ -472,11 +467,12 @@ class RectObstacle extends Obstacle{
 }
 
 // 円。中心ベクトルと半径で3次元。
+// a,bとr.グリッドの半整数倍許す。rは半径。これも半整数OK.
 class CircleObstacle extends Obstacle{
-  constructor(id, cx, cy, r){
+  constructor(id, a, b, r){
     super(id);
-    this.center = createVector(cx, cy);
-    this.radius = r;
+    this.center = createVector(a * GRID, b * GRID);
+    this.radius = r * GRID;
   }
   getDist(p){
     return p5.Vector.dist(p, this.center) - this.radius;
@@ -487,14 +483,17 @@ class CircleObstacle extends Obstacle{
 }
 
 // 線分。中心ベクトルと方向、幅、長さで5次元くらい？
+// directionはTAU/24の整数倍で指定する。で、他はまあGRIDを掛けるのです・・
+// つまり下に伸びるなら6で上に伸びるなら-6を用意するのね。(a,b)が端点になるわね。左に伸びるなら0だわね。
 class SegmentObstacle extends Obstacle{
-  constructor(id, cx, cy, direction, radius, lgh){
+  constructor(id, a, b, dirId, radius, lgh){
     super(id);
-    this.center = createVector(cx, cy);
+    this.center = createVector(a * GRID, b * GRID);
+    const direction = dirId * TAU / 24;
     this.normalVector = createVector(Math.cos(direction), Math.sin(direction));
     // 注意：これは線分の伸びる方向と逆方向です。
-    this.radius = radius; // 線分の幅
-    this.lgh = lgh; // 伸びる長さ
+    this.radius = radius * GRID; // 線分の幅
+    this.lgh = lgh * GRID; // 伸びる長さ
   }
   getDist(p){
     const q1 = p5.Vector.sub(p, this.center);
@@ -508,11 +507,12 @@ class SegmentObstacle extends Obstacle{
 }
 
 // 正方形。
+// a,bで半整数倍許す。この場合はlかな。一辺の長さなので。
 class SquareObstacle extends Obstacle{
-  constructor(id, cx, cy, r){
+  constructor(id, a, b, l){
     super(id);
-    this.center = createVector(cx, cy);
-    this.size = r; // 一辺の長さ
+    this.center = createVector(a * GRID, b * GRID);
+    this.size = l * GRID; // 一辺の長さ
   }
   getDist(p){
     const dx = abs(p.x - this.center.x) - 0.5 * this.size;
@@ -533,13 +533,20 @@ class Player{
     this.position = createVector();
     this.nextPosition = createVector();
     this.velocity = createVector(0, 0);
-    this.life = 1;
-    this.maxLife = 1;
+    this.maxLife = 60;
+    this.life = this.maxLife;
     this.alive = true;
   }
   initialize(x, y){
     this.position.set(x, y);
     this.alive = true;
+  }
+  lifeReset(){
+    // ゲームオーバーの時だけ。
+    this.life = this.maxLife;
+  }
+  getLifeRatio(){
+    return this.life / this.maxLife;
   }
   changeLife(diff){
     this.life = constrain(this.life + diff, 0, this.maxLife);
@@ -598,10 +605,14 @@ class EnemyEye{
     this.count = 0;
     this.lightRange = lRange;
     this.lightHue = lHue;
+    this.attackFactor = 1.0; // 攻撃力
     this.createEyeImage();
   }
   setMoveFunc(func){
     this.moveFunc = func;
+  }
+  getAttackFactor(){
+    return this.attackFactor;
   }
   createEyeImage(){
     // そのうち画像貼り付けにするので今は適当で
@@ -650,6 +661,7 @@ class System{
     this.informationLayer = createGraphics(width, height); // 情報いろいろ
     // 具体的にはクリアとかのメッセージとHPゲージとroomNo.と
     // HP減るときのゲージアニメでパーティクル出すのもここで
+    this.lifeGaugeImg = createGraphics(320, 16);
     this.prepareForInformation();
 
     this._lightEffect = createGraphics(width, height, WEBGL);
@@ -677,15 +689,21 @@ class System{
     // つまり正方形に触れるのではなく中心にちゃんと来ないとだめ
     // シェーダー側でこれを中心に正方形、で、vec4(0.0)にする。
     // 0.05刻みで指定してくださいそのプラスマイナス0.05で正方形です
-    this.goalCheckThreshold = 0.05; // これを増減させてレベルを動かせそう
+    this.goalCheckThreshold = 1.0; // これを増減させてレベルを動かせそう
   }
   prepareForInformation(){
     let gr = this.informationLayer;
-    // 暫定的にテキスト設定
+    // いろいろ設定
+    gr.noStroke();
     gr.textSize(24);
     gr.textAlign(CENTER, CENTER);
-    gr.fill(255);
-    gr.noStroke();
+    let gauge = this.lifeGaugeImg;
+    gauge.colorMode(HSB, 100);
+    gauge.noStroke();
+    for(let i = 0; i < 320; i++){
+      gauge.fill(55, i * 100 / 320, 100);
+      gauge.rect(i, 0, 1, 16);
+    }
   }
   shaderReset(obs, shaderName){
     distFuncDescription = createDistFuncDescription(obs);
@@ -699,13 +717,19 @@ class System{
     this.floorPatternSeed = Math.random() * 9999;
   }
   roomInitialize(nextRoomNumber = 0){
-    this.roomNumber = nextRoomNumber;
-    this.roomSet[this.roomNumber]();
     this._fade.setFadeInFlag(true);
     this._properFrameCount = 0;
+    // ゲームオーバーならライフをリセット
+    // 最初に戻る場合も・・いっしょだから要らなくなってしまった（まあいいや）
+    if(this.gameoverFlag || nextRoomNumber === 0){ this._player.lifeReset(); }
     // フラグリセット
     this.gameoverFlag = false;
     this.clearFlag = false;
+    // パーティクルが残らないように
+    this._particleArray.clear();
+    // パターンをセット
+    this.roomNumber = nextRoomNumber;
+    this.roomSet[this.roomNumber]();
   }
   registEyes(_eyes){
     this.eyes.clear();
@@ -754,7 +778,7 @@ class System{
     if(!this._player.isAlive()){ return; }
     if(!this.clearFlag){
       const pos = this._player.position;
-      if(mag(pos.x - this.goalPos.x, pos.y - this.goalPos.y) < this.goalCheckThreshold){
+      if(mag(pos.x - this.goalPos.x, pos.y - this.goalPos.y) < this.goalCheckThreshold * GRID){
         this.clearFlag = true;
         this._fade.setFadeOutFlag(true);
       }
@@ -780,7 +804,7 @@ class System{
       this.gameoverFlag = true;
     }else{
       if(!this._fade.getFadeOutFlag()){
-        this.roomInitialize(this.roomNumber);
+        this.roomInitialize(0); // ゲームオーバーの場合は最初に戻る
       }
     }
     //if(!this._player.isAlive() && !this._fade.getFadeOutFlag()){
@@ -802,25 +826,36 @@ class System{
       cur.x += ray.x * d;
       cur.y += ray.y * d;
     }
-    let l = p5.Vector.dist(pPos, ePos);
+    let l = p5.Vector.dist(pPos, ePos); // 倍率はexp(-l*l/3)くらいにしようかな（距離2でおよそ0.25になる）
     const lDir = eye.lightDirection;
     const lVector = createVector(Math.cos(lDir), Math.sin(lDir));
     const lRange = eye.lightRange;
-    if(p5.Vector.dist(cur, ePos) > l && p5.Vector.dot(ray, lVector) > lRange && this._player.alive == true){
+    if(p5.Vector.dist(cur, ePos) > l && p5.Vector.dot(ray, lVector) > lRange && this._player.isAlive()){
       //this.kill(); // 殺す処理
-      this._player.changeLife(-1); // 1ダメージで死ぬ
+      const damage = Math.exp(-l*l/3.0) * eye.getAttackFactor(); // 攻撃力を考慮
+      // パーティクル発生
+      // プレイヤーのは地味だから要らないや。ゲージだけ減らそう。で、個別だと面倒だからそのまま使う・・感じで。
+      // って思ったけど広い範囲を移動する際に面倒な・・ならないか。
+      // 画面全体・・んー。
+      this.createParticle(4 + this._player.getLifeRatio() * 316, 8, 6, 30, 4, 10);
+      this._player.changeLife(-damage); // 1ダメージで死ぬ
     }
   }
   kill(){
     //this._player.alive = false;
-    this.createParticle(60, 4, 40);
+    const pos = this._player.position;
+    this.createParticle((pos.x + 1.0) * 0.5 * width, (1.0 - pos.y) * 0.5 * height, 12, 60, 4, 40);
     //this.fadeOutCount = 1;
     this._fade.setFadeOutFlag(true);
   }
-  createParticle(life, speed, count){
-    const size = 12;  // やられる時は0.7, ダメージ時は2.0で。
-    const _color = color(255);
-    let newParticle = new Particle((this._player.position.x + 1.0) * 0.5 * width, (1.0 - this._player.position.y) * 0.5 * height, size, _color, life, speed, count);
+  createParticle(x, y, _size, life, speed, count, r = 255, g = 255, b = 255){
+    // HPゲージ：sizeFactor = 6, life = 30, speed = 4, count = 5.
+    // ゴール地点のパーティクル：sizefactor = 3, life = 15, speed = 4, count = 2;
+    // targetは発生場所。レーザーの場合はくらった相手の場所に発生させる。
+    // 光によるダメージ：sizeFactor = 4, life = 15, speed = 4, count = 2.
+    const size = _size;  // やられる時は0.7, ダメージ時は2.0で。
+    const _color = color(r, g, b);
+    let newParticle = new Particle(x, y, size, _color, life, speed, count);
     this._particleArray.add(newParticle);
   }
   draw(){
@@ -830,6 +865,8 @@ class System{
     this.setUniform();
     this._lightEffect.quad(-1, -1, -1, 1, 1, 1, 1, -1);
     gr.image(this._lightEffect, 0, 0);
+    // lightEffectの一部をbaseGraphicに落とす。そのうえで、
+    // offsetを考慮して目玉やプレイヤーを配置すればいい。
 
     this._player.draw(gr);
     this.eyes.loop("draw", [gr])
@@ -843,17 +880,27 @@ class System{
 
     image(gr, 0, 0);
 
-    this.informationLayer.clear();
+    this.drawInformation();
+
+    image(this.informationLayer, 0, 0);
+  }
+  drawInformation(){
+    let gr = this.informationLayer;
+    gr.clear();
+    gr.fill(255);
     if(this._fade.getFadeInFlag()){
-      this.informationLayer.text("room" + this.roomNumber + ":caption this.", width * 0.5, height * 0.5);
+      gr.text("room" + this.roomNumber + ":caption this.", width * 0.5, height * 0.5);
     }
     if(this.gameoverFlag){
-      this.informationLayer.text("GAMEOVER...", width * 0.5, height * 0.5);
+      gr.text("GAMEOVER...", width * 0.5, height * 0.5);
     }
     if(this.clearFlag){
-      this.informationLayer.text("CLEAR!", width * 0.5, height * 0.5);
+      gr.text("CLEAR!", width * 0.5, height * 0.5);
     }
-    image(this.informationLayer, 0, 0);
+    if(this._player.isAlive()){
+      const ratio = this._player.getLifeRatio();
+      gr.image(this.lifeGaugeImg, 2, 2, 316 * ratio, 12, 0, 0, 320 * ratio, 16);
+    }
   }
 }
 
@@ -933,9 +980,10 @@ class Fade{
 // eyesの行動パターン登録を・・
 function room0(){
 
-  mySystem.goalPos.set(-0.85, 0.85);
-  mySystem.goalCheckThreshold = 0.05;
+  mySystem.goalPos.set(-17 * GRID, 17 * GRID);
+  mySystem.goalCheckThreshold = 1.0;
 
+  // Eyes.
   let eyes = [];
   eyes.push(new EnemyEye(0.0, 0.0, TAU / 295, 0.65, 0.05));
   eyes[0].setMoveFunc((c, pos) => {
@@ -952,11 +1000,11 @@ function room0(){
 
   // Obstacles.
   let obs = [];
-  obs.push(new CircleObstacle(0, -0.3, 0.6, 0.2));
-  obs.push(new RectObstacle(1, 0.4, -0.4, 0.3, 0.2));
-  obs.push(new SquareObstacle(2, 0.4, 0.5, 0.35));
-  obs.push(new SegmentObstacle(3, -0.7, 0.0, PI*0.5, 0.1, 0.3));
-  obs.push(new SquareObstacle(4, -0.1, -0.4, 0.4));
+  obs.push(new CircleObstacle(0, -6, 12, 4));
+  obs.push(new RectObstacle(1, 5, -10, 11, -6));
+  obs.push(new SquareObstacle(2, 8, 10, 7));
+  obs.push(new SegmentObstacle(3, -14, 0, 6, 2, 6));
+  obs.push(new SquareObstacle(4, -2, -8, 8));
 
   createWall(5, obs); // 壁を作る
 
@@ -967,9 +1015,10 @@ function room0(){
 // そのうち追加しやすくする・・tweenほしいわね
 // 光の出る感じのあれこれとか操作しやすくしたいので(ぐるぐるだけじゃね)
 function room1(){
-  mySystem.goalPos.set(0.0, -0.4);
-  mySystem.goalCheckThreshold = 0.05;
+  mySystem.goalPos.set(0 * GRID, -8 * GRID);
+  mySystem.goalCheckThreshold = 1.0;
 
+  // Eyes.
   let eyes = [];
   eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.55));
   eyes[0].setMoveFunc((c, pos) => {
@@ -986,11 +1035,11 @@ function room1(){
 
   // Obstacles.
   let obs = [];
-  obs.push(new RectObstacle(0, -0.5, 0.5, 0.1, 0.3));
-  obs.push(new RectObstacle(1, -0.5, -0.5, 0.1, 0.3));
-  obs.push(new RectObstacle(2, 0.5, 0.5, 0.1, 0.3));
-  obs.push(new RectObstacle(3, 0.5, -0.5, 0.1, 0.3));
-  obs.push(new SquareObstacle(4, 0.0, 0.0, 0.2));
+  obs.push(new RectObstacle(0, -11, 7, -9, 13));
+  obs.push(new RectObstacle(1, -11, -13, -9, -7));
+  obs.push(new RectObstacle(2, 9, 7, 11, 13));
+  obs.push(new RectObstacle(3, 9, -13, 11, -7));
+  obs.push(new SquareObstacle(4, 0, 0, 4));
 
   createWall(5, obs); // 壁を作る
 
@@ -1000,10 +1049,10 @@ function room1(){
 
 // 外周を作るのは処理を再利用しましょうね
 function createWall(startIndex, obs){
-  obs.push(new RectObstacle(startIndex, 0.0, 31.0/32.0, 2.0, 1.0 / 16.0));
-  obs.push(new RectObstacle(startIndex+1, 0.0, -31.0/32.0, 2.0, 1.0 / 16.0));
-  obs.push(new RectObstacle(startIndex+2, 31.0/32.0, 0.0, 1.0 / 16.0, 2.0));
-  obs.push(new RectObstacle(startIndex+3, -31.0/32.0, 0.0, 1.0 / 16.0, 2.0));
+  obs.push(new RectObstacle(startIndex, -20, 19, 20, 20));
+  obs.push(new RectObstacle(startIndex+1, -20, -20, -19, 20));
+  obs.push(new RectObstacle(startIndex+2, 19, -20, 20, 20));
+  obs.push(new RectObstacle(startIndex+3, -20, -20, 20, -19));
 }
 
 function createDistFuncDescription(obs){
