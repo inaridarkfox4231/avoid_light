@@ -71,7 +71,12 @@
 // 穴に落ちたらアニメーション、で、フェードアウト。
 // で、HPとかリセットして、roomのナンバーを進めて次のステージ作る。
 
+// チェックポイント複数用意してそれらを全部踏むとクリア、
+// 踏んだチェックポイントは光るようにするのもいいわね。
+// ステージ作りやすくしたいわね
+
 const DEFAULT_FLOOR_ALPHA = 0.0; // 床をみえるようにする（テスト用）
+const ROOMNUMBER_MAX = 2; // 2の場合0と1があるということです（以下略）
 
 let vsLight =
 "precision mediump float;" +
@@ -94,6 +99,7 @@ let fsLightUpper =
 "uniform float u_lightHue[4];" + // 光の色
 "uniform float u_DEFAULT_FLOOR_ALPHA;" + // デバッグ用の床の透明度
 "uniform vec2 u_seed;" + // 模様のためのシード値
+"uniform vec2 u_goalPos;" + // 0.05刻みでゴール指定
 // 定数
 "const float pi = 3.14159;" +
 "const float TAU = atan(1.0) * 8.0;" +
@@ -240,22 +246,29 @@ let fsLightLower =
 // 他のマスはそれより明るいですね。つまりひとつだけ暗いマスがあって
 // そこに落ちればクリアというわけ。クリアの仕組み作ってないけど。
 "vec4 getBG(vec2 p){" +
-"  p *= 8.0;" +
-"  if(floor(p.x) == -7.0 && floor(p.y) == 6.0){" +
-"    return vec4(vec3(0.0), u_DEFAULT_FLOOR_ALPHA);" +
-"  }" +
-"  vec2 q = floor(p + 32.0) / 64.0;" +
+"  p *= 10.0;" +
+"  vec2 q = floor(p + 40.0) / 80.0;" +
 "  p = fract(p);" +
 "  p = floor(p * 5.0);" +
 "  float rdm = abs(sin(q.x * p.x * u_seed.x + q.y * p.y * u_seed.y));" +
 "  vec3 col = vec3(0.1+floor(rdm * 16.0) / 16.0);" +
 "  return vec4(col, u_DEFAULT_FLOOR_ALPHA);" +
 "}" +
+// 背景をcolに設定（ゴールだけ別に用意）
+// じゃあこれで。0.05刻みで0.05で落とす。あっちの方も。
+// プレイヤーの座標はこっちとリンクさせてあるから問題ない。
+"void setBackground(vec2 p, out vec4 col, vec4 bg){" +
+"  col = bg;" +
+"  if(abs(p.x - u_goalPos.x) < 0.05 && abs(p.y - u_goalPos.y) < 0.05){" +
+"    col = vec4(vec3(0.0), u_DEFAULT_FLOOR_ALPHA);" +
+"  }" +
+"}" +
+// メインコード
 "void main(){" +
 "  vec2 p = (gl_FragCoord.xy * 2.0 - u_resolution.xy) / min(u_resolution.x, u_resolution.y);" +
 "  vec4 bg = getBG(p);" +
 "  vec4 col = vec4(vec3(0.0), 1.0);" +
-"  col = bg;" +
+"  setBackground(p, col, bg);" +
 "  float d = getDist(p);" +
 "  if(d < 0.0){" +
 "  d = max(d, -1.0);" +
@@ -287,6 +300,12 @@ function setup() {
   //noStroke();
   mySystem = new System();
   mySystem.roomInitialize();
+
+  // 暫定的にテキスト設定
+  textSize(24);
+  textAlign(CENTER, CENTER);
+  fill(255);
+  noStroke();
 }
 
 function draw() {
@@ -508,11 +527,17 @@ class Player{
     this.position = createVector();
     this.nextPosition = createVector();
     this.velocity = createVector(0, 0);
+    this.life = 1;
+    this.maxLife = 1;
     this.alive = true;
   }
   initialize(x, y){
     this.position.set(x, y);
     this.alive = true;
+  }
+  changeLife(diff){
+    this.life = constrain(this.life + diff, 0, this.maxLife);
+    if(this.life === 0){ this.alive = false; } // 死んだ！
   }
   update(){
     if(!this.alive){ return; } // 死んだ！
@@ -558,9 +583,8 @@ class Player{
 // パターン制御で位置や光の範囲を決めたいのよね。あと回転とかも。
 // lightRangeが増減したりとかしたら面白そう。
 class EnemyEye{
-  constructor(x, y, rotSpeed, lRange, lHue, r = 255, g = 128, b = 0){
+  constructor(x, y, rotSpeed, lRange, lHue){
     this.img = createGraphics(40, 40);
-    this.createEyeImage(r, g, b);
     this.position = createVector(x, y);
     this.moveFunc = () => {};
     this.lightDirection = 0;
@@ -568,20 +592,23 @@ class EnemyEye{
     this.count = 0;
     this.lightRange = lRange;
     this.lightHue = lHue;
+    this.createEyeImage();
   }
   setMoveFunc(func){
     this.moveFunc = func;
   }
-  createEyeImage(r, g, b){
+  createEyeImage(){
+    // そのうち画像貼り付けにするので今は適当で
     this.img.noStroke();
-    this.img.fill(r, g, b);
+    this.img.colorMode(HSB,100);
+    this.img.fill(this.lightHue * 100, 100, 100);
     this.img.circle(20, 20, 40);
-    this.img.fill(255);
+    this.img.fill(100);
     this.img.circle(32, 20, 16);
     this.img.fill(0);
     this.img.circle(34, 20, 12);
     this.img.stroke(0);
-    this.img.fill(255);
+    this.img.fill(100);
     const t = PI / 6;
     this.img.circle(34 + 4 * Math.cos(t), 20 + 4 * Math.sin(t), 4);
     this.img.noStroke();
@@ -613,6 +640,7 @@ class System{
     this._player = new Player();
 
     this.baseGraphic = createGraphics(width, height); // ベースもこちらに
+
     this._lightEffect = createGraphics(width, height, WEBGL);
     this._lightEffect.pixelDensity(1);
 
@@ -624,7 +652,7 @@ class System{
     this.currentShader = undefined;
     this.lightShaders = {};
 
-    this.roomSet = [room0];
+    this.roomSet = [room0, room1];
     this.roomNumber = 0; // ここが1とか2とかになるという・・
     this.floorPatternSeed = [0, 0];
 
@@ -634,12 +662,14 @@ class System{
     // クリア判定はこのポイントに触れたときとする（大きさが）
     // つまり正方形に触れるのではなく中心にちゃんと来ないとだめ
     // シェーダー側でこれを中心に正方形、で、vec4(0.0)にする。
+    // 0.05刻みで指定してくださいそのプラスマイナス0.05で正方形です
+    this.goalCheckThreshold = 0.05; // これを増減させてレベルを動かせそう
   }
   shaderReset(obs, shaderName){
     distFuncDescription = createDistFuncDescription(obs);
     if(!this.lightShaders[shaderName]){
       fsLight = fsLightUpper + distFuncDescription + fsLightLower;
-      this.lightShaders.shader0 = this._lightEffect.createShader(vsLight, fsLight);
+      this.lightShaders[shaderName] = this._lightEffect.createShader(vsLight, fsLight);
     }
     this.currentShader = this.lightShaders[shaderName];
     this._lightEffect.shader(this.currentShader);
@@ -647,10 +677,14 @@ class System{
     this.floorPatternSeed[0] = Math.random() * 9999;
     this.floorPatternSeed[1] = Math.random() * 9999;
   }
-  roomInitialize(){
+  roomInitialize(nextRoomNumber = 0){
+    this.roomNumber = nextRoomNumber;
     this.roomSet[this.roomNumber]();
     this._fade.setFadeInFlag(true);
     this._properFrameCount = 0;
+    // フラグリセット
+    this.gameoverFlag = false;
+    this.clearFlag = false;
   }
   registEyes(_eyes){
     this.eyes.clear();
@@ -678,6 +712,7 @@ class System{
     sh.setUniform("u_lightHue", eyelHueData);
     sh.setUniform("u_DEFAULT_FLOOR_ALPHA", DEFAULT_FLOOR_ALPHA);
     sh.setUniform("u_seed", this.floorPatternSeed);
+    sh.setUniform("u_goalPos", [this.goalPos.x, this.goalPos.y]);
   }
   update(){
     this.eyes.loop("update");
@@ -695,6 +730,19 @@ class System{
     // クリアフラグ立っててフェードアウト終わってるなら
     // ルームナンバーを更新して次のステージをスタートさせる
     // フラグを立てるのはその間にメッセージ出したいから
+    if(!this._player.isAlive()){ return; }
+    if(!this.clearFlag){
+      const pos = this._player.position;
+      if(mag(pos.x - this.goalPos.x, pos.y - this.goalPos.y) < this.goalCheckThreshold){
+        this.clearFlag = true;
+        this._fade.setFadeOutFlag(true);
+      }
+    }else{
+      if(!this._fade.getFadeOutFlag()){
+        // 必要ならルームナンバーを増やす？1とかして。
+        this.roomInitialize((this.roomNumber + 1) % ROOMNUMBER_MAX);
+      }
+    }
   }
   gameOverCheck(){
     // ゆくゆくはこっちでkillの処理をする感じね
@@ -705,13 +753,23 @@ class System{
     // なおフラグを立てるのはその間になんかメッセージ出したいから
     // そして↓
     // プレイヤー死んでてfadeOut終わってたら戻す。
-    if(!this._player.isAlive() && !this._fade.getFadeOutFlag()){
-      this.roomInitialize();
+    if(this._player.isAlive()){ return; }
+    if(!this.gameoverFlag){
+      this.kill();
+      this.gameoverFlag = true;
+    }else{
+      if(!this._fade.getFadeOutFlag()){
+        this.roomInitialize(this.roomNumber);
+      }
     }
+    //if(!this._player.isAlive() && !this._fade.getFadeOutFlag()){
+    //  this.roomInitialize();
+    //}
   }
   calcDamage(eye){
     // クリアフラグが立ってるならダメージを受けないように
     // しないといけない
+    if(this.clearFlag || this.gameoverFlag){ return; }
     const pPos = this._player.position;
     const ePos = eye.position;
     const ray = p5.Vector.sub(pPos, ePos).normalize();
@@ -728,11 +786,12 @@ class System{
     const lVector = createVector(Math.cos(lDir), Math.sin(lDir));
     const lRange = eye.lightRange;
     if(p5.Vector.dist(cur, ePos) > l && p5.Vector.dot(ray, lVector) > lRange && this._player.alive == true){
-      this.kill(); // 殺す処理
+      //this.kill(); // 殺す処理
+      this._player.changeLife(-1); // 1ダメージで死ぬ
     }
   }
   kill(){
-    this._player.alive = false;
+    //this._player.alive = false;
     this.createParticle(60, 4, 40);
     //this.fadeOutCount = 1;
     this._fade.setFadeOutFlag(true);
@@ -762,6 +821,13 @@ class System{
     // クリアフラグやゲームオーバーフラグが立ってるならなんか出す
 
     image(gr, 0, 0);
+
+    if(this.gameoverFlag){
+      text("GAMEOVER...", width * 0.5, height * 0.5);
+    }
+    if(this.clearFlag){
+      text("CLEAR!", width * 0.5, height * 0.5);
+    }
   }
 }
 
@@ -840,12 +906,16 @@ class Fade{
 // おわり！
 // eyesの行動パターン登録を・・
 function room0(){
+
+  mySystem.goalPos.set(-0.85, 0.85);
+  mySystem.goalCheckThreshold = 0.05;
+
   let eyes = [];
-  eyes.push(new EnemyEye(0.0, 0.0, TAU / 295, 0.65, 0.05, 255, 128, 0));
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 295, 0.65, 0.05));
   eyes[0].setMoveFunc((c, pos) => {
     pos.set(0.5 * Math.sin(TAU * c / 360), 0.0);
   });
-  eyes.push(new EnemyEye(0.0, 0.0, TAU / 180, 0.99, 0.35, 128, 255, 0));
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 180, 0.99, 0.35));
   eyes[1].setMoveFunc((c, pos) => {
     pos.set(-0.5, -0.3+0.3*Math.sin(TAU * c / 360));
   });
@@ -866,6 +936,40 @@ function room0(){
 
   // 処理は簡潔に。
   mySystem.shaderReset(obs, "shader0");
+}
+
+// そのうち追加しやすくする・・tweenほしいわね
+// 光の出る感じのあれこれとか操作しやすくしたいので(ぐるぐるだけじゃね)
+function room1(){
+  mySystem.goalPos.set(0.0, -0.4);
+  mySystem.goalCheckThreshold = 0.05;
+
+  let eyes = [];
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.55));
+  eyes[0].setMoveFunc((c, pos) => {
+    pos.set(-0.7, -0.5 * Math.sin(TAU * c / 360));
+  });
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.65));
+  eyes[1].setMoveFunc((c, pos) => {
+    pos.set(0.7, 0.5 * Math.sin(TAU * c / 360));
+  });
+  mySystem.registEyes(eyes);
+
+  // Player.
+  mySystem._player.initialize(-0.4, 0.8);
+
+  // Obstacles.
+  let obs = [];
+  obs.push(new RectObstacle(0, -0.5, 0.5, 0.1, 0.3));
+  obs.push(new RectObstacle(1, -0.5, -0.5, 0.1, 0.3));
+  obs.push(new RectObstacle(2, 0.5, 0.5, 0.1, 0.3));
+  obs.push(new RectObstacle(3, 0.5, -0.5, 0.1, 0.3));
+  obs.push(new SquareObstacle(4, 0.0, 0.0, 0.2));
+
+  createWall(5, obs); // 壁を作る
+
+  // 処理は簡潔に。
+  mySystem.shaderReset(obs, "shader1");
 }
 
 // 外周を作るのは処理を再利用しましょうね
