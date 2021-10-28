@@ -1,7 +1,3 @@
-// 光の下では生きていけない
-// 光がないと出口が見えない
-// そんな感じですかね
-
 // これをもとに2DshaderTemplate充実させたいわね
 
 // 2Dにする
@@ -103,7 +99,7 @@ let fsLightUpper =
 "uniform float u_lightHue[4];" + // 光の色
 "uniform float u_default_Floor_Alpha;" + // デバッグ用の床の透明度
 "uniform float u_seed;" + // 模様のためのシード値
-"uniform vec2 u_goalPos;" + // 0.05刻みでゴール指定
+"uniform vec3 u_goalPos;" + // 0.05刻みでゴール指定(3つ目の引数はタッチしたかどうか)
 // 定数
 "const float pi = 3.14159;" +
 "const float TAU = atan(1.0) * 8.0;" +
@@ -270,6 +266,13 @@ let fsLightLower =
 "    col = vec4(vec3(0.0), u_default_Floor_Alpha);" +
 "  }" +
 "}" +
+// ゴールというか
+"void goalCheck(vec2 p, out vec4 col){" +
+"  if(u_goalPos.z == 1.0){" +
+"    float d = max(abs(p.x - u_goalPos.x), abs(p.y - u_goalPos.y)) - 0.025;" +
+"    col += vec4(exp(-d*32.0));" +
+"  }" +
+"}" +
 // メインコード
 "void main(){" +
 "  vec2 p = (gl_FragCoord.xy * 2.0 - u_resolution.xy) / min(u_resolution.x, u_resolution.y);" +
@@ -288,6 +291,7 @@ let fsLightLower =
 "      calcLightArea(p, col, u_eyePos[i], u_lightDirection[i], u_lightRange[i], u_lightHue[i]);" +
 "    }" +
 "  }" +
+"  goalCheck(p, col);" +
 "  gl_FragColor = col;" +
 "}";
 
@@ -684,7 +688,7 @@ class System{
 
     this.clearFlag = false;
     this.gameoverFlag = false;
-    this.goalPos = createVector(); // ゴールの正方形の中心
+    this.goalPos = createVector(0.0, 0.0, 0.0); // ゴールの正方形の中心(3つ目の引数は0か1で踏んだかどうかを示す)
     // クリア判定はこのポイントに触れたときとする（大きさが）
     // つまり正方形に触れるのではなく中心にちゃんと来ないとだめ
     // シェーダー側でこれを中心に正方形、で、vec4(0.0)にする。
@@ -757,7 +761,7 @@ class System{
     sh.setUniform("u_lightHue", eyelHueData);
     sh.setUniform("u_default_Floor_Alpha", this.defaultFloorAlpha);
     sh.setUniform("u_seed", this.floorPatternSeed);
-    sh.setUniform("u_goalPos", [this.goalPos.x, this.goalPos.y]);
+    sh.setUniform("u_goalPos", [this.goalPos.x, this.goalPos.y, this.goalPos.z]);
   }
   update(){
     this.eyes.loop("update");
@@ -779,6 +783,7 @@ class System{
     if(!this.clearFlag){
       const pos = this._player.position;
       if(mag(pos.x - this.goalPos.x, pos.y - this.goalPos.y) < this.goalCheckThreshold * GRID){
+        this.goalPos.z = 1;
         this.clearFlag = true;
         this._fade.setFadeOutFlag(true);
       }
@@ -980,7 +985,7 @@ class Fade{
 // eyesの行動パターン登録を・・
 function room0(){
 
-  mySystem.goalPos.set(-17 * GRID, 17 * GRID);
+  mySystem.goalPos.set(-17 * GRID, 17 * GRID, 0);
   mySystem.goalCheckThreshold = 1.0;
 
   // Eyes.
@@ -1015,7 +1020,7 @@ function room0(){
 // そのうち追加しやすくする・・tweenほしいわね
 // 光の出る感じのあれこれとか操作しやすくしたいので(ぐるぐるだけじゃね)
 function room1(){
-  mySystem.goalPos.set(0 * GRID, -8 * GRID);
+  mySystem.goalPos.set(0 * GRID, -8 * GRID, 0);
   mySystem.goalCheckThreshold = 1.0;
 
   // Eyes.
