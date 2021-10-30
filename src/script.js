@@ -782,6 +782,9 @@ class System{
     if(!this._player.isAlive()){ return; }
     if(!this.clearFlag){
       const pos = this._player.position;
+      // この判定を毎フレームすべてのチェックポイントに対して行い該当したら1にする、
+      // そのあとすべて1かどうか調べてすべて1なら・・ってやる
+      // フラグを用意してやればループは1回で済む（0があったらfalseって感じで）
       if(mag(pos.x - this.goalPos.x, pos.y - this.goalPos.y) < this.goalCheckThreshold * GRID){
         this.goalPos.z = 1;
         this.clearFlag = true;
