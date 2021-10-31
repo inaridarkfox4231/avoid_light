@@ -75,7 +75,7 @@
 // しゅいさんの配信聴きながら作業してる（お絵描きしたい）
 
 const DEFAULT_FLOOR_ALPHA = 0.5; // 床をみえるようにする（テスト用）
-const ROOMNUMBER_MAX = 2; // 2の場合0と1があるということです（以下略）
+const ROOMNUMBER_MAX = 3; // 2の場合0と1があるということです（以下略）
 const GRID = 0.05; // これを使って簡単に位置指定
 
 let vsLight =
@@ -88,6 +88,7 @@ let vsLight =
 let fsLightUpper =
 "precision mediump float;" +
 "uniform vec2 u_resolution;" +
+"uniform vec2 u_stageSize;" + // ステージサイズでした（ごめんね）
 "uniform float u_count;" +
 // eye関連。eyeを増やすならここはすべて配列になる。
 // 実際にはその個数を記録しておいてそこまでやる感じ。
@@ -319,7 +320,7 @@ let fsLightLower =
 "}" +
 // メインコード
 "void main(){" +
-"  vec2 p = (gl_FragCoord.xy * 2.0 - u_resolution.xy) / min(u_resolution.x, u_resolution.y);" +
+"  vec2 p = (gl_FragCoord.xy * 2.0 - u_stageSize.xy) / min(u_resolution.x, u_resolution.y);" +
 "  vec4 bg = getBG(p);" +
 "  vec4 col = vec4(vec3(0.0), 1.0);" +
 "  setBackground(p, col, bg);" +
@@ -672,7 +673,7 @@ class Player{
   movable(){
     // バウンドチェック
     // distFunctionはそのうちsystemからアクセスするように・・
-    if(abs(this.nextPosition.x) > 0.98 || abs(this.nextPosition.y) > 0.98){ return false; }
+    //if(abs(this.nextPosition.x) > 0.98 || abs(this.nextPosition.y) > 0.98){ return false; }
     return distFunction(this.nextPosition) > 0.02;
   }
   isAlive(){
@@ -680,15 +681,17 @@ class Player{
   }
   draw(gr){
     if(!this.alive){ return; } // 死んだ！
-    const x = (this.position.x + 1.0) * 0.5 * width;
-    const y = (1.0 - this.position.y) * 0.5 * height;
+    //const sz = mySystem.getStageSize();
+    //const x = (this.position.x * width + sz.x) * 0.5;
+    //const y = (sz.y - this.position.y * height) * 0.5;
+    const q = getGlobalPosition(this.position);
     gr.stroke(255);
     gr.strokeWeight(1);
     gr.noFill();
-    gr.circle(x, y, 20);
+    gr.circle(q.x, q.y, 20);
     gr.strokeWeight(2);
-    gr.line(x-1,y,x-1,y-4);
-    gr.line(x+4,y,x+4,y-4);
+    gr.line(q.x-1,q.y,q.x-1,q.y-4);
+    gr.line(q.x+4,q.y,q.x+4,q.y-4);
     gr.noStroke();
   }
 }
@@ -743,9 +746,11 @@ class EnemyEye{
     this.count++;
   }
   draw(gr){
-    const ex = (this.position.x + 1.0) * 0.5 * width;
-    const ey = (1.0 - this.position.y) * 0.5 * height;
-    gr.translate(ex, ey);
+    //const sz = mySystem.getStageSize();
+    //const ex = (this.position.x * width + sz.x) * 0.5;
+    //const ey = (sz.y - this.position.y * height) * 0.5;
+    const e = getGlobalPosition(this.position);
+    gr.translate(e.x, e.y);
     gr.rotate(-this.lightDirection); // tiがitになってた。。。馬鹿、、
     gr.image(this.img, -20, -20);
     gr.resetMatrix();
@@ -782,7 +787,7 @@ class System{
     this.currentShader = undefined;
     this.lightShaders = {};
 
-    this.roomSet = [room0, room1];
+    this.roomSet = [room2, room1, room0];
     this.roomNumber = 0; // ここが1とか2とかになるという・・
     this.floorPatternSeed = 0;
     this.defaultFloorAlpha = DEFAULT_FLOOR_ALPHA;
@@ -803,6 +808,9 @@ class System{
     // 中身は長さ3のベクトルで第3成分は0で乗ると1になるわけね。全部乗るとゴールが解放される感じ。
     this.goalPosition = createVector(0.0, 0.0, 0.0); // ゴールの正方形の中心(3つ目の引数で解放されたかどうかを示す)
     // これに乗ったらステージクリア
+
+    this.stageSize = createVector(); // ステージの大きさ・・プレイヤーの描画の際のオフセット指定に使う。
+    // プレイヤーの実位置を使うので計算注意
   }
   prepareForInformation(){
     let gr = this.informationLayer;
@@ -862,9 +870,33 @@ class System{
   setGoal(x, y){
     this.goalPosition.set(x, y, 0.0);
   }
+  setStageSize(w, h){
+    // resizeCanvas使うと動的にグラフィックの大きさを変えられる
+    this.stageSize.set(w, h);
+    this.baseGraphic.resizeCanvas(w, h);
+    this._lightEffect.resizeCanvas(w, h);
+  }
+  getStageSize(){
+    return this.stageSize;
+  }
+  calcOffset(){
+    /*
+    const x = (this.position.x + 1.0) * 0.5 * width;
+    const y = (1.0 - this.position.y) * 0.5 * height;
+    */
+    //const p = this._player.position;
+    const sz = this.getStageSize();
+    //const x = (p.x * width + sz.x) * 0.5;
+    //const y = (sz.y - p.y * height) * 0.5;
+    const q = getGlobalPosition(this._player.position);
+    const offsetX = constrain(q.x - width * 0.5, 0.0, sz.x - width);
+    const offsetY = constrain(q.y - height * 0.5, 0.0, sz.y - height);
+    return {x:offsetX, y:offsetY}; // OK？
+  }
   setUniform(){
     let sh = this.currentShader;
     sh.setUniform("u_resolution", [width, height]);
+    sh.setUniform("u_stageSize", [this.stageSize.x, this.stageSize.y]); // ステージサイズ情報
     sh.setUniform("u_count", this._properFrameCount);
     sh.setUniform("u_eyeCount", 2);
 
@@ -1015,8 +1047,12 @@ class System{
   }
   kill(){
     //this._player.alive = false;
-    const pos = this._player.position;
-    this.createParticle((pos.x + 1.0) * 0.5 * width, (1.0 - pos.y) * 0.5 * height, 12, 60, 4, 40);
+    //const pos = this._player.position;
+    //const sz = this.stageSize;
+    //const x = (pos.x * width + sz.x) * 0.5;
+    //const y = (sz.y - pos.y * height) * 0.5;
+    const q = getGlobalPosition(this._player.position);
+    this.createParticle(q.x, q.y, 12, 60, 4, 40);
     //this.fadeOutCount = 1;
     this._fade.setFadeOutFlag(true);
   }
@@ -1050,7 +1086,9 @@ class System{
     // フェードインの間にルームナンバー出した方がよさそうならその処理
     // クリアフラグやゲームオーバーフラグが立ってるならなんか出す
 
-    image(gr, 0, 0);
+    //image(gr, 0, 0);
+    const offset = this.calcOffset();
+    image(gr, 0, 0, width, height, offset.x, offset.y, width, height);
 
     this.drawInformation();
 
@@ -1152,6 +1190,9 @@ class Fade{
 // eyesの行動パターン登録を・・
 function room0(){
 
+  // ステージのサイズを決定
+  mySystem.setStageSize(640, 640);
+
   // チェックポイントとゴール関連
   let cps = [];
   cps.push(createVector(-17 * GRID, 2 * GRID, 0.0));
@@ -1199,6 +1240,9 @@ function createEyePattern0(){
 // 光の出る感じのあれこれとか操作しやすくしたいので(ぐるぐるだけじゃね)
 function room1(){
 
+  // ステージのサイズを決定
+  mySystem.setStageSize(640, 640);
+
   // チェックポイントとゴール関連
   let cps = [];
   cps.push(createVector(17 * GRID, -17 * GRID, 0.0));
@@ -1241,12 +1285,65 @@ function createEyePattern1(){
   mySystem.registEyes(eyes);
 }
 
+// じゃあひとつ増やしてみるか・・
+
+function room2(){
+
+  // ステージのサイズを決定
+  mySystem.setStageSize(1280, 640);
+
+  // チェックポイントとゴール関連
+  let cps = [];
+  cps.push(createVector(17 * GRID, -17 * GRID, 0.0));
+  cps.push(createVector(-17 * GRID, -17 * GRID, 0.0));
+  mySystem.registCheckpoints(cps);
+  mySystem.setGoal(0 * GRID, -8 * GRID);
+  mySystem.goalCheckThreshold = 1.0;
+
+  // Eyes.
+  createEyePattern2();
+
+  // Player.
+  mySystem._player.initialize(-0.4, 0.8);
+
+  // Obstacles.
+  let obs = [];
+  obs.push(new RectObstacle(0, -10, 10, 0, 2, 6));
+  obs.push(new RectObstacle(1, -10, -10, 0, 2, 6));
+  obs.push(new RectObstacle(2, 10, 10, 0, 2, 6));
+  obs.push(new RectObstacle(3, 10, -10, 0, 2, 6));
+  obs.push(new SquareObstacle(4, 0, 0, Math.PI/4, 4)); // 0追加
+
+  createWall(obs.length, obs); // 壁を作る
+  mySystem.registObstacles(obs);
+
+  // 処理は簡潔に。
+  mySystem.shaderReset(obs, "shader2");
+}
+
+function createEyePattern2(){
+  let eyes = [];
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.55));
+  eyes[0].setMoveFunc((eye) => {
+    eye.position.set(-0.7, -0.5 * Math.sin(TAU * eye.count / 360));
+  });
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.65));
+  eyes[1].setMoveFunc((eye) => {
+    eye.position.set(0.7, 0.5 * Math.sin(TAU * eye.count / 360));
+  });
+  mySystem.registEyes(eyes);
+}
+
+
 // 外周を作るのは処理を再利用しましょうね
 function createWall(startIndex, obs){
-  obs.push(new RectObstacle(startIndex, 0, 19.5, 0, 40, 1));
-  obs.push(new RectObstacle(startIndex+1, -19.5, 0, 0, 1, 40));
-  obs.push(new RectObstacle(startIndex+2, 19.5, 0, 0, 1, 40));
-  obs.push(new RectObstacle(startIndex+3, 0, -19.5, 0, 40, 1));
+  const sz = mySystem.getStageSize();
+  const x1 = sz.x/32|0;
+  const y1 = sz.y/32|0;
+  obs.push(new RectObstacle(startIndex, 0, y1-0.5, 0, x1*2, 1));
+  obs.push(new RectObstacle(startIndex+1, -x1+0.5, 0, 0, 1, y1*2));
+  obs.push(new RectObstacle(startIndex+2, x1-0.5, 0, 0, 1, y1*2));
+  obs.push(new RectObstacle(startIndex+3, 0, -y1+0.5, 0, x1*2, 1));
 }
 
 function createDistFuncDescription(obs){
@@ -1277,4 +1374,15 @@ function createDistFunction(obs){
     }
     return d;
   }
+}
+
+/*
+const sz = mySystem.getStageSize();
+const x = (this.position.x * width + sz.x) * 0.5;
+const y = (sz.y - this.position.y * height) * 0.5;
+*/
+// 同じ計算しまくってるので・・ステージ内での位置情報をキャンバス内での位置情報に変換する関数
+function getGlobalPosition(p){
+  const sz = mySystem.getStageSize();
+  return {x:(p.x * width + sz.x) * 0.5, y:(sz.y - p.y * height) * 0.5};
 }
