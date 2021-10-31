@@ -102,6 +102,7 @@ let fsLightUpper =
 "uniform vec2 u_obsPos[20];" + // 障害物の位置情報（最大20個）
 "uniform float u_obsRot[20];" + // 障害物の回転情報（最大20個）というわけで円にも必要ですね・・全部必要。
 "uniform vec3 u_checkPos[4];" + // チェックポイント（最大4つ）
+"uniform int u_checkPosCapacity;" + // チェックポイントの個数
 "uniform vec3 u_goalPos;" + // 0.05刻みでゴール指定(3つ目の引数はタッチしたかどうか)
 // 定数
 "const float pi = 3.14159;" +
@@ -119,6 +120,8 @@ let fsLightUpper =
 "const vec3 green = vec3(0.3, 0.9, 0.4);" +
 "const vec3 blue = vec3(0.2, 0.25, 0.98);" +
 "const vec3 white = vec3(1.0);" +
+"const vec3 skyblue = vec3(0.1, 0.65, 0.9);" + // チェックポイント
+"const vec3 limegreen = vec3(0.19, 0.87, 0.19);" + // ライムグリーン
 // ランダム関連(seed追加)
 "const vec2 r_vector = vec2(12.9898, 78.233);" +
 "const float r_coeff = 43758.5453123;" +
@@ -277,17 +280,41 @@ let fsLightLower =
 // 背景をcolに設定（ゴールだけ別に用意）
 // じゃあこれで。0.05刻みで0.05で落とす。あっちの方も。
 // プレイヤーの座標はこっちとリンクさせてあるから問題ない。
+// 変更内容
+// チェックポイント（最大4つ）について然るべきcolにする。おわり！
+// ゴールも同じ処理・・ただし位置がシークレットなので出現するまではベースを黒にしない。
 "void setBackground(vec2 p, out vec4 col, vec4 bg){" +
 "  col = bg;" +
-"  if(abs(p.x - u_goalPos.x) < 0.05 && abs(p.y - u_goalPos.y) < 0.05){" +
-"    col = vec4(vec3(0.0), u_default_Floor_Alpha);" +
+"  for(int i = 0; i < 4; i++){" +
+"    if(i < u_checkPosCapacity){" +
+"      if(abs(p.x - u_checkPos[i].x) < 0.05 && abs(p.y - u_checkPos[i].y) < 0.05){" +
+"        col = vec4(vec3(0.0), u_default_Floor_Alpha);" +
+"      }" +
+"    }" +
+"  }" +
+"  if(u_goalPos.z == 1.0){" +
+"    if(abs(p.x - u_goalPos.x) < 0.1 && abs(p.y - u_goalPos.y) < 0.1){;" +
+"      col = vec4(vec3(0.0), u_default_Floor_Alpha);" +
+"    }" +
 "  }" +
 "}" +
-// ゴールというか
-"void goalCheck(vec2 p, out vec4 col){" +
+// 変更内容
+// チェックポイントについては踏まれているならskyblueのglowで0.025
+// ゴールについても出現しているならlimegreenのglowで0.05ですね。OK. つまりゴールは出現するまで見えないわけです。
+"void drawCheckPointsAndGoal(vec2 p, out vec4 col){" +
+"  for(int i = 0; i < 4; i++){" +
+"    if(i < u_checkPosCapacity){" +
+"      if(u_checkPos[i].z == 1.0){" +
+"        float dc = max(abs(p.x - u_checkPos[i].x), abs(p.y - u_checkPos[i].y)) - 0.025;" +
+"        float diffc = exp(-dc*32.0);" +
+"        col += vec4(vec3(diffc) * skyblue, diffc);" +
+"      }" +
+"    }" +
+"  }" +
 "  if(u_goalPos.z == 1.0){" +
-"    float d = max(abs(p.x - u_goalPos.x), abs(p.y - u_goalPos.y)) - 0.025;" +
-"    col += vec4(exp(-d*32.0));" +
+"    float dg = max(abs(p.x - u_goalPos.x), abs(p.y - u_goalPos.y)) - 0.05;" +
+"    float diffg = exp(-dg*32.0);" +
+"    col += vec4(vec3(diffg) * limegreen, diffg);" +
 "  }" +
 "}" +
 // メインコード
@@ -308,7 +335,7 @@ let fsLightLower =
 "      calcLightArea(p, col, u_eyePos[i], u_lightDirection[i], u_lightRange[i], u_lightHue[i]);" +
 "    }" +
 "  }" +
-"  goalCheck(p, col);" +
+"  drawCheckPointsAndGoal(p, col);" +
 "  gl_FragColor = col;" +
 "}";
 
@@ -529,8 +556,6 @@ class RectObstacle extends Obstacle{
   constructor(id, x, y, rot, a, b){
     super(id, x, y, rot);
     this.typeName = "rect";
-    //this.setPosition((a + c) * 0.5 * GRID, (b + d) * 0.5 * GRID);
-    //this.center = createVector((a + c) * 0.5 * GRID, (b + d) * 0.5 * GRID);
     this.sizeVector = createVector(a * GRID, b * GRID); // 横幅と縦幅
   }
   getDist(p){
@@ -551,8 +576,6 @@ class CircleObstacle extends Obstacle{
   constructor(id, x, y, rot, r){
     super(id, x, y, rot);
     this.typeName = "circle";
-    //this.setPosition(a * GRID, b + GRID);
-    //this.center = createVector(a * GRID, b * GRID);
     this.radius = r * GRID;
   }
   getDist(p){
@@ -572,12 +595,6 @@ class SegmentObstacle extends Obstacle{
   constructor(id, x, y, rot, radius, lgh){
     super(id, x, y, rot);
     this.typeName = "segment";
-    //this.setPosition(a * GRID, b * GRID);
-    //this.center = createVector(a * GRID, b * GRID);
-    //const direction = dirId * TAU / 24;
-    //this.normalVector = createVector(Math.cos(direction), Math.sin(direction));
-    // normalVectorは(1, 0)にするのでそこら辺いろいろいじるわね
-    // 注意：これは線分の伸びる方向と逆方向です。
     this.radius = radius * GRID; // 線分の幅
     this.lgh = lgh * GRID; // 伸びる長さ
   }
@@ -599,8 +616,6 @@ class SquareObstacle extends Obstacle{
   constructor(id, x, y, rot, l){
     super(id, x, y, rot);
     this.typeName = "square";
-    //this.setPosition(a * GRID, b * GRID);
-    //this.center = createVector(a * GRID, b * GRID);
     this.size = l * GRID; // 一辺の長さ
   }
   getDist(p){
@@ -775,7 +790,7 @@ class System{
 
     this.clearFlag = false;
     this.gameoverFlag = false;
-    this.goalPos = createVector(0.0, 0.0, 0.0); // ゴールの正方形の中心(3つ目の引数は0か1で踏んだかどうかを示す)
+
     // クリア判定はこのポイントに触れたときとする（大きさが）
     // つまり正方形に触れるのではなく中心にちゃんと来ないとだめ
     // シェーダー側でこれを中心に正方形、で、vec4(0.0)にする。
@@ -784,6 +799,10 @@ class System{
 
     this.obstacles = new SimpleCrossReferenceArray(); // 障害物たち（必要ですかね・・）
     // これないとsetUniformできないので必須ですね。
+    this.checkpoints = new SimpleCrossReferenceArray(); // チェックポイントたち
+    // 中身は長さ3のベクトルで第3成分は0で乗ると1になるわけね。全部乗るとゴールが解放される感じ。
+    this.goalPosition = createVector(0.0, 0.0, 0.0); // ゴールの正方形の中心(3つ目の引数で解放されたかどうかを示す)
+    // これに乗ったらステージクリア
   }
   prepareForInformation(){
     let gr = this.informationLayer;
@@ -826,12 +845,22 @@ class System{
     this.roomSet[this.roomNumber]();
   }
   registEyes(_eyes){
+    // 目玉の情報を登録
     this.eyes.clear();
     this.eyes.addMulti(_eyes);
   }
   registObstacles(_obs){
+    // 障害物の情報を登録
     this.obstacles.clear();
     this.obstacles.addMulti(_obs);
+  }
+  registCheckpoints(_checkpoints){
+    // チェックポイントを登録
+    this.checkpoints.clear();
+    this.checkpoints.addMulti(_checkpoints);
+  }
+  setGoal(x, y){
+    this.goalPosition.set(x, y, 0.0);
   }
   setUniform(){
     let sh = this.currentShader;
@@ -870,7 +899,15 @@ class System{
 
     sh.setUniform("u_default_Floor_Alpha", this.defaultFloorAlpha);
     sh.setUniform("u_seed", this.floorPatternSeed);
-    sh.setUniform("u_goalPos", [this.goalPos.x, this.goalPos.y, this.goalPos.z]);
+
+    // チェックポイント関連
+    let checkPosData = [];
+    for(let cp of this.checkpoints){
+      checkPosData.push(cp.x, cp.y, cp.z);
+    }
+    sh.setUniform("u_checkPos", checkPosData);
+    sh.setUniform("u_checkPosCapacity", this.checkpoints.length);
+    sh.setUniform("u_goalPos", [this.goalPosition.x, this.goalPosition.y, this.goalPosition.z]);
   }
   update(){
     this.eyes.loop("update");
@@ -894,11 +931,28 @@ class System{
       const pos = this._player.position;
       // この判定を毎フレームすべてのチェックポイントに対して行い該当したら1にする、
       // そのあとすべて1かどうか調べてすべて1なら・・ってやる
-      // フラグを用意してやればループは1回で済む（0があったらfalseって感じで）
+      // フラグを用意してやればループは1回で済む（clearedはひとつでも0のままならfalse）
+      let cleared = true;
+      for(let cp of this.checkpoints){
+        if(mag(pos.x - cp.x, pos.y - cp.y) < this.goalCheckThreshold * GRID){
+          cp.z = 1.0;
+        }
+        if(cp.z === 0.0){ cleared = false; } // まだクリアしてない
+      }
+      /*
       if(mag(pos.x - this.goalPos.x, pos.y - this.goalPos.y) < this.goalCheckThreshold * GRID){
         this.goalPos.z = 1;
         this.clearFlag = true;
         this._fade.setFadeOutFlag(true);
+      }
+      */
+      // 全部1になったらゴールを出現させる
+      if(cleared){
+        this.goalPosition.z = 1.0;
+        if(mag(pos.x - this.goalPosition.x, pos.y - this.goalPosition.y) < this.goalCheckThreshold * GRID){
+          this.clearFlag = true;
+          this._fade.setFadeOutFlag(true);
+        }
       }
     }else{
       if(!this._fade.getFadeOutFlag()){
@@ -1098,7 +1152,12 @@ class Fade{
 // eyesの行動パターン登録を・・
 function room0(){
 
-  mySystem.goalPos.set(-17 * GRID, 17 * GRID, 0);
+  // チェックポイントとゴール関連
+  let cps = [];
+  cps.push(createVector(-17 * GRID, 2 * GRID, 0.0));
+  cps.push(createVector(17 * GRID, 2 * GRID, 0.0));
+  mySystem.registCheckpoints(cps);
+  mySystem.setGoal(-17 * GRID, 17 * GRID);
   mySystem.goalCheckThreshold = 1.0;
 
   // Eyes.
@@ -1111,7 +1170,6 @@ function room0(){
   // rectはa,b,c,dに対して(a+c)/2と(b+d)/2がx,yでrotはとりあえず0で横幅縦幅は|a-c|と|b-d|ですね
   let obs = [];
   obs.push(new CircleObstacle(0, -6, 12, 0, 4)); // 0追加
-  // obs.push(new RectObstacle(1, 5, -10, 11, -6));
   obs.push(new RectObstacle(1, 8, -8, 0, 6, 4)); // 修正
   obs.push(new SquareObstacle(2, 8, 10, 0, 7)); // 0追加
   obs.push(new SegmentObstacle(3, -14, 0, Math.PI/2, 2, 6)); // 反時計回りに90°回転させる感じね
@@ -1140,7 +1198,13 @@ function createEyePattern0(){
 // そのうち追加しやすくする・・tweenほしいわね
 // 光の出る感じのあれこれとか操作しやすくしたいので(ぐるぐるだけじゃね)
 function room1(){
-  mySystem.goalPos.set(0 * GRID, -8 * GRID, 0);
+
+  // チェックポイントとゴール関連
+  let cps = [];
+  cps.push(createVector(17 * GRID, -17 * GRID, 0.0));
+  cps.push(createVector(-17 * GRID, -17 * GRID, 0.0));
+  mySystem.registCheckpoints(cps);
+  mySystem.setGoal(0 * GRID, -8 * GRID);
   mySystem.goalCheckThreshold = 1.0;
 
   // Eyes.
@@ -1151,18 +1215,11 @@ function room1(){
 
   // Obstacles.
   let obs = [];
-  /*
-  obs.push(new RectObstacle(0, -11, 7, -9, 13));
-  obs.push(new RectObstacle(1, -11, -13, -9, -7));
-  obs.push(new RectObstacle(2, 9, 7, 11, 13));
-  obs.push(new RectObstacle(3, 9, -13, 11, -7));
-  obs.push(new SquareObstacle(4, 0, 0, 4));
-  */
   obs.push(new RectObstacle(0, -10, 10, 0, 2, 6));
   obs.push(new RectObstacle(1, -10, -10, 0, 2, 6));
   obs.push(new RectObstacle(2, 10, 10, 0, 2, 6));
   obs.push(new RectObstacle(3, 10, -10, 0, 2, 6));
-  obs.push(new SquareObstacle(4, 0, 0, 0, 4)); // 0追加
+  obs.push(new SquareObstacle(4, 0, 0, Math.PI/4, 4)); // 0追加
 
   createWall(obs.length, obs); // 壁を作る
   mySystem.registObstacles(obs);
@@ -1186,12 +1243,6 @@ function createEyePattern1(){
 
 // 外周を作るのは処理を再利用しましょうね
 function createWall(startIndex, obs){
-  /*
-  obs.push(new RectObstacle(startIndex, -20, 19, 20, 20));
-  obs.push(new RectObstacle(startIndex+1, -20, -20, -19, 20));
-  obs.push(new RectObstacle(startIndex+2, 19, -20, 20, 20));
-  obs.push(new RectObstacle(startIndex+3, -20, -20, 20, -19));
-  */
   obs.push(new RectObstacle(startIndex, 0, 19.5, 0, 40, 1));
   obs.push(new RectObstacle(startIndex+1, -19.5, 0, 0, 1, 40));
   obs.push(new RectObstacle(startIndex+2, 19.5, 0, 0, 1, 40));
@@ -1204,7 +1255,6 @@ function createDistFuncDescription(obs){
   for(let ob of obs){
     upperPart += ob.getString();
   }
-  console.log(upperPart);
   // 距離を返す部分
   let lowerPart = "  float result = 99999.0;";
   for(let i = 0; i < obs.length - (obs.length % 2); i += 2){
