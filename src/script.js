@@ -74,7 +74,7 @@
 // floatをfloorって書いちゃって10分消えた（バカ）
 // しゅいさんの配信聴きながら作業してる（お絵描きしたい）
 
-const DEFAULT_FLOOR_ALPHA = 0.0; // 床をみえるようにする（テスト用）
+const DEFAULT_FLOOR_ALPHA = 0.5; // 床をみえるようにする（テスト用）
 const ROOMNUMBER_MAX = 2; // 2の場合0と1があるということです（以下略）
 const GRID = 0.05; // これを使って簡単に位置指定
 
@@ -99,6 +99,9 @@ let fsLightUpper =
 "uniform float u_lightHue[4];" + // 光の色
 "uniform float u_default_Floor_Alpha;" + // デバッグ用の床の透明度
 "uniform float u_seed;" + // 模様のためのシード値
+"uniform vec2 u_obsPos[20];" + // 障害物の位置情報（最大20個）
+"uniform float u_obsRot[20];" + // 障害物の回転情報（最大20個）というわけで円にも必要ですね・・全部必要。
+"uniform vec3 u_checkPos[4];" + // チェックポイント（最大4つ）
 "uniform vec3 u_goalPos;" + // 0.05刻みでゴール指定(3つ目の引数はタッチしたかどうか)
 // 定数
 "const float pi = 3.14159;" +
@@ -124,6 +127,11 @@ let fsLightUpper =
 "}" +
 // ベクトル取得関数
 "vec2 fromAngle(float t){ return vec2(cos(t), sin(t)); }" +
+// ベクトルの回転
+// 逆回転にすることで、ちゃんと反時計回りに回るようになる。ここややこしいのでそんなもんだと思っていいです。どうせ2通りしかないので。
+"void rotZ(out vec2 p, in float rot){" +
+"  p *= mat2(cos(rot), sin(rot), -sin(rot), cos(rot));" +
+"}" +
 // 正二面体群
 // 基本領域の中心が0にくるように調整してある
 "vec2 dihedral_center(vec2 p, float n){" +
@@ -149,17 +157,21 @@ let fsLightUpper =
 "  }" +
 "  return p;" +
 "}" +
-// 円(中心c半径r)
-"float circle(vec2 p, vec2 c, float r){" +
-"  return length(p - c) - r;" +
+// 円(中心c半径r) rot要らないけど一応ね。
+"float circle(vec2 p, vec2 c, float rot, float r){" +
+"  p -= c;" +
+"  rotZ(p, rot);" +
+"  return length(p) - r;" +
 "}" +
-// 長方形(中心c,横q.xで縦q.y)
-"float rect(vec2 p, vec2 c, vec2 q){" +
+// 長方形(中心c,横q.xで縦q.y) rotで回転させるわね
+"float rect(vec2 p, vec2 c, float rot, vec2 q){" +
+"  rotZ(p, rot);" +
 "  return max(abs(p.x - c.x) - q.x * 0.5, abs(p.y - c.y) - q.y * 0.5);" +
 "}" +
-// 正方形(中心c,横も縦もr)
-"float square(vec2 p, vec2 c, float r){" +
+// 正方形(中心c,横も縦もr) rotは平行移動してからですね。じゃないとあらぬ方向に飛んで行ってしまう。
+"float square(vec2 p, vec2 c, float rot, float r){" +
 "  p -= c;" +
+"  rotZ(p, rot);" +
 "  return max(abs(p.x) - r * 0.5, abs(p.y) - r * 0.5);" +
 "}" +
 // 三角形
@@ -187,12 +199,16 @@ let fsLightUpper =
 "  p = (p - c) * mat2(cos(t), -sin(t), sin(t), cos(t));" +
 "  return max(length(p) - r, r * 0.65 - length(p - vec2(r * 0.5, 0.0)));" +
 "}" +
-// 線分。cから単位ベクトルeと逆の方向に長さhで幅r.
-"float segment(vec2 p, vec2 c, vec2 e, float r, float h){" +
+// 線分。cから単位ベクトルeと逆の方向に長さhで幅r. rot情報ぼちぼち放り込んでいくわね。
+// eは不要になった。で、(1,0)扱いです。
+"float segment(vec2 p, vec2 c, float rot, float r, float h){" +
 "  p -= c;" +
-"  return length(p - max(-h, min(0.0, dot(p, e))) * e) - r;" +
+"  rotZ(p, rot);" +
+"  return length(p - vec2(max(-h, min(0.0, p.x)), 0.0)) - r;" +
 "}" +
 // ハート(cが先端でeが上向き)
+// 落ち着くまで封印します（segmentの仕様を変更したので）
+/*
 "float heart(vec2 p, vec2 c, vec2 e, float r){" +
 "  const float k = 0.707;" +
 "  vec2 e1 = e * mat2(k, -k, k, k);" +
@@ -203,6 +219,7 @@ let fsLightUpper =
 "  float d3 = max(abs(p.x), abs(p.y)) - r;" +
 "  return min(min(d1, d2), d3);" +
 "}" +
+*/
 // getRGB(HSBをRGBに変換する関数)
 "vec3 getRGB(float h, float s, float b){" +
 "  vec3 c = vec3(h, s, b);" +
@@ -439,92 +456,161 @@ class SimpleCrossReferenceArray extends Array{
 // 正方形や円。StageDataのdistFunctionを構成する要素。
 // 衝突判定の構成要素を作る感じ。そう。
 // 色により性質が異なる感じで。
-
+// getStringのうち最初のid,pos.x,pos.y,rotは共通なので、
+// まとめてメソッドにしてしまえばいいと思う。
+// めんどうだから最初の3つは中心と回転でいい気がするわねめんどくさい
 class Obstacle{
-  constructor(id){
+  constructor(id, x, y, rot){
     this.id = id;
+    this.typeName = ""; // これもstringに織り込む
+    this.position = createVector(x * GRID, y * GRID); // GRIDの半整数倍または整数倍
+    this.rotation = rot; // radian.
+    this.active = false; // 動くかどうか的な。動いてるとプレイヤーを殺す。
+    this.moveFunc = (ob) => {};
+    this.count = 0;
+  }
+  isActive(){
+    return this.active;
+  }
+  activate(){
+    this.active = true;
+  }
+  inActivate(){
+    this.active = false;
+  }
+  setPosition(x, y){
+    this.position.set(x, y);
+  }
+  setRotation(_rot){
+    this.rotation = _rot;
+  }
+  getPosition(){
+    return this.position;
+  }
+  getRotation(){
+    return this.rotation;
   }
   getDist(p){
     return 0;
   }
+  getPrefix(){
+    // getStringのうち最初のid,pos.x,pos.y,rot部分を抜き出す。
+    // posとrotはuniformから放り込むのでこっちに書くことはないわね・・
+    let result = "  float d";
+    result += this.id.toString();
+    result += " =";
+    result += this.typeName;
+    result += "(p, vec2(u_obsPos[" + this.id.toString() + "].x, u_obsPos[" + this.id.toString() + "].y), ";
+    result += "u_obsRot[" + this.id.toString() + "], ";
+    return result;
+  }
+  translate(p){
+    // pをpositionだけずらしてrotationだけ回転させる感じ
+    let q = createVector(p.x, p.y);
+    q.sub(this.position);
+    const x = q.x * Math.cos(this.rotation) + q.y * Math.sin(this.rotation);
+    const y = -q.x * Math.sin(this.rotation) + q.y * Math.cos(this.rotation);
+    q.set(x, y);
+    return q;
+  }
   getString(){
     return "";
+  }
+  update(){
+    this.moveFunc(this);
+    this.count++;
   }
 }
 
 // 長方形。中心ベクトルとサイズベクトルで4次元。
 // a,b,c,dで(a,b)～(c,d)のあれで。左下と右上。
+// やめた。aとbが縦と横。GRID掛けてね。
 class RectObstacle extends Obstacle{
-  constructor(id, a, b, c, d){
-    super(id);
-    this.center = createVector((a + c) * 0.5 * GRID, (b + d) * 0.5 * GRID);
-    this.sizeVector = createVector(abs(a - c) * GRID, abs(b - d) * GRID); // 横幅と縦幅
+  constructor(id, x, y, rot, a, b){
+    super(id, x, y, rot);
+    this.typeName = "rect";
+    //this.setPosition((a + c) * 0.5 * GRID, (b + d) * 0.5 * GRID);
+    //this.center = createVector((a + c) * 0.5 * GRID, (b + d) * 0.5 * GRID);
+    this.sizeVector = createVector(a * GRID, b * GRID); // 横幅と縦幅
   }
   getDist(p){
-    const dx = abs(p.x - this.center.x) - 0.5 * this.sizeVector.x;
-    const dy = abs(p.y - this.center.y) - 0.5 * this.sizeVector.y;
+    // GLSLと同じ処理になるように書きます！つまり先に平行移動と回転を終わらせておく。
+    let q = this.translate(p);
+    const dx = abs(q.x) - 0.5 * this.sizeVector.x;
+    const dy = abs(q.y) - 0.5 * this.sizeVector.y;
     return max(dx, dy);
   }
   getString(){
-    return "  float d" + this.id.toString() + " = rect(p, vec2(" + this.center.x.toString() + ", " + this.center.y.toString() + "), vec2(" + this.sizeVector.x.toString() + ", " + this.sizeVector.y.toString() + "));";
+    return this.getPrefix() + "vec2(" + this.sizeVector.x.toString() + ", " + this.sizeVector.y.toString() + "));";
   }
 }
 
 // 円。中心ベクトルと半径で3次元。
 // a,bとr.グリッドの半整数倍許す。rは半径。これも半整数OK.
 class CircleObstacle extends Obstacle{
-  constructor(id, a, b, r){
-    super(id);
-    this.center = createVector(a * GRID, b * GRID);
+  constructor(id, x, y, rot, r){
+    super(id, x, y, rot);
+    this.typeName = "circle";
+    //this.setPosition(a * GRID, b + GRID);
+    //this.center = createVector(a * GRID, b * GRID);
     this.radius = r * GRID;
   }
   getDist(p){
-    return p5.Vector.dist(p, this.center) - this.radius;
+    let q = this.translate(p);
+    return p5.Vector.mag(q) - this.radius;
   }
   getString(){
-    return "  float d" + this.id.toString() + " = circle(p, vec2(" + this.center.x.toString() + ", " + this.center.y.toString() + "), " + this.radius +");";
+    return this.getPrefix() + this.radius.toString() +");";
   }
 }
 
 // 線分。中心ベクトルと方向、幅、長さで5次元くらい？
 // directionはTAU/24の整数倍で指定する。で、他はまあGRIDを掛けるのです・・
 // つまり下に伸びるなら6で上に伸びるなら-6を用意するのね。(a,b)が端点になるわね。左に伸びるなら0だわね。
+// てかrot使うならdirection要らないわね。横でいい。(1,0)でいいじゃんね。となると左方向に伸びるのがデフォルト。
 class SegmentObstacle extends Obstacle{
-  constructor(id, a, b, dirId, radius, lgh){
-    super(id);
-    this.center = createVector(a * GRID, b * GRID);
-    const direction = dirId * TAU / 24;
-    this.normalVector = createVector(Math.cos(direction), Math.sin(direction));
+  constructor(id, x, y, rot, radius, lgh){
+    super(id, x, y, rot);
+    this.typeName = "segment";
+    //this.setPosition(a * GRID, b * GRID);
+    //this.center = createVector(a * GRID, b * GRID);
+    //const direction = dirId * TAU / 24;
+    //this.normalVector = createVector(Math.cos(direction), Math.sin(direction));
+    // normalVectorは(1, 0)にするのでそこら辺いろいろいじるわね
     // 注意：これは線分の伸びる方向と逆方向です。
     this.radius = radius * GRID; // 線分の幅
     this.lgh = lgh * GRID; // 伸びる長さ
   }
   getDist(p){
-    const q1 = p5.Vector.sub(p, this.center);
-    const multiplier = max(-this.lgh, min(0.0, p5.Vector.dot(q1, this.normalVector)));
-    const q2 = p5.Vector.mult(this.normalVector, multiplier);
+    //const q1 = p5.Vector.sub(p, this.position);
+    const q1 = this.translate(p);
+    const multiplier = max(-this.lgh, min(0.0, q1.x));
+    const q2 = createVector(multiplier, 0);
     return p5.Vector.dist(q1, q2) - this.radius;
   }
   getString(){
-    return "  float d" + this.id.toString() + " = segment(p, vec2(" + this.center.x.toString() + ", " + this.center.y.toString() + "), vec2(" + this.normalVector.x.toString() + ", " + this.normalVector.y.toString() + "), " + this.radius.toString() + ", " + this.lgh.toString() + ");";
+    return this.getPrefix() + this.radius.toString() + ", " + this.lgh.toString() + ");";
   }
 }
 
 // 正方形。
 // a,bで半整数倍許す。この場合はlかな。一辺の長さなので。
 class SquareObstacle extends Obstacle{
-  constructor(id, a, b, l){
-    super(id);
-    this.center = createVector(a * GRID, b * GRID);
+  constructor(id, x, y, rot, l){
+    super(id, x, y, rot);
+    this.typeName = "square";
+    //this.setPosition(a * GRID, b * GRID);
+    //this.center = createVector(a * GRID, b * GRID);
     this.size = l * GRID; // 一辺の長さ
   }
   getDist(p){
-    const dx = abs(p.x - this.center.x) - 0.5 * this.size;
-    const dy = abs(p.y - this.center.y) - 0.5 * this.size;
+    let q = this.translate(p);
+    const dx = abs(q.x) - 0.5 * this.size;
+    const dy = abs(q.y) - 0.5 * this.size;
     return max(dx, dy);
   }
   getString(){
-    return "  float d" + this.id.toString() + " = square(p, vec2(" + this.center.x.toString() + ", " + this.center.y.toString() + "), " + this.size.toString() +");";
+    return this.getPrefix() + this.size.toString() +");";
   }
 }
 
@@ -603,7 +689,7 @@ class EnemyEye{
   constructor(x, y, rotSpeed, lRange, lHue){
     this.img = createGraphics(40, 40);
     this.position = createVector(x, y);
-    this.moveFunc = () => {};
+    this.moveFunc = (eye) => {};
     this.lightDirection = 0;
     this.rotationSpeed = rotSpeed; // TAU/何とか、の形を推奨(95とか)
     this.count = 0;
@@ -635,9 +721,10 @@ class EnemyEye{
     this.img.noStroke();
   }
   update(){
-    this.lightDirection += this.rotationSpeed;
+    this.lightDirection += this.rotationSpeed; // そのうちこれの変化も織り込むつもり・・難しいけど。
     // プログラムされたとおりに移動
-    this.moveFunc(this.count, this.position);
+    // thisでいいでしょ。
+    this.moveFunc(this);
     this.count++;
   }
   draw(gr){
@@ -694,6 +781,9 @@ class System{
     // シェーダー側でこれを中心に正方形、で、vec4(0.0)にする。
     // 0.05刻みで指定してくださいそのプラスマイナス0.05で正方形です
     this.goalCheckThreshold = 1.0; // これを増減させてレベルを動かせそう
+
+    this.obstacles = new SimpleCrossReferenceArray(); // 障害物たち（必要ですかね・・）
+    // これないとsetUniformできないので必須ですね。
   }
   prepareForInformation(){
     let gr = this.informationLayer;
@@ -739,11 +829,17 @@ class System{
     this.eyes.clear();
     this.eyes.addMulti(_eyes);
   }
+  registObstacles(_obs){
+    this.obstacles.clear();
+    this.obstacles.addMulti(_obs);
+  }
   setUniform(){
     let sh = this.currentShader;
     sh.setUniform("u_resolution", [width, height]);
     sh.setUniform("u_count", this._properFrameCount);
     sh.setUniform("u_eyeCount", 2);
+
+    // eye関連
     let eyePosData = [];
     let eyeDirData = [];
     let eyelRangeData = [];
@@ -759,6 +855,19 @@ class System{
     // 配列の形でないとデフォで0が入っちゃう仕様みたいですね。
     sh.setUniform("u_lightRange", eyelRangeData);
     sh.setUniform("u_lightHue", eyelHueData);
+
+    // obstacle関連
+    let obsPosData = [];
+    let obsRotData = [];
+    for(let ob of this.obstacles){
+      const pos2 = ob.getPosition();
+      const rot2 = ob.getRotation(); // eyeの方もgetPositionすべきですかね・・移植するなら意識すべきかしらね。
+      obsPosData.push(pos2.x, pos2.y);
+      obsRotData.push(rot2);
+    }
+    sh.setUniform("u_obsPos", obsPosData);
+    sh.setUniform("u_obsRot", obsRotData);
+
     sh.setUniform("u_default_Floor_Alpha", this.defaultFloorAlpha);
     sh.setUniform("u_seed", this.floorPatternSeed);
     sh.setUniform("u_goalPos", [this.goalPos.x, this.goalPos.y, this.goalPos.z]);
@@ -766,6 +875,7 @@ class System{
   update(){
     this.eyes.loop("update");
     this._player.update();
+    this.obstacles.loop("update");
     for(let eye of this.eyes){ this.calcDamage(eye); }
     this._particleArray.loopReverse("update");
     this._particleArray.loopReverse("eject");
@@ -992,32 +1102,39 @@ function room0(){
   mySystem.goalCheckThreshold = 1.0;
 
   // Eyes.
-  let eyes = [];
-  eyes.push(new EnemyEye(0.0, 0.0, TAU / 295, 0.65, 0.05));
-  eyes[0].setMoveFunc((c, pos) => {
-    pos.set(0.5 * Math.sin(TAU * c / 360), 0.0);
-  });
-  eyes.push(new EnemyEye(0.0, 0.0, TAU / 180, 0.99, 0.35));
-  eyes[1].setMoveFunc((c, pos) => {
-    pos.set(-0.5, -0.3+0.3*Math.sin(TAU * c / 360));
-  });
-  mySystem.registEyes(eyes);
+  createEyePattern0();
 
   // Player.
   mySystem._player.initialize(0.4, 0.8);
 
   // Obstacles.
+  // rectはa,b,c,dに対して(a+c)/2と(b+d)/2がx,yでrotはとりあえず0で横幅縦幅は|a-c|と|b-d|ですね
   let obs = [];
-  obs.push(new CircleObstacle(0, -6, 12, 4));
-  obs.push(new RectObstacle(1, 5, -10, 11, -6));
-  obs.push(new SquareObstacle(2, 8, 10, 7));
-  obs.push(new SegmentObstacle(3, -14, 0, 6, 2, 6));
-  obs.push(new SquareObstacle(4, -2, -8, 8));
+  obs.push(new CircleObstacle(0, -6, 12, 0, 4)); // 0追加
+  // obs.push(new RectObstacle(1, 5, -10, 11, -6));
+  obs.push(new RectObstacle(1, 8, -8, 0, 6, 4)); // 修正
+  obs.push(new SquareObstacle(2, 8, 10, 0, 7)); // 0追加
+  obs.push(new SegmentObstacle(3, -14, 0, Math.PI/2, 2, 6)); // 反時計回りに90°回転させる感じね
+  obs.push(new SquareObstacle(4, -2, -8, 0, 8)); // 0はrot.
 
-  createWall(5, obs); // 壁を作る
+  createWall(obs.length, obs); // 壁を作る
+  mySystem.registObstacles(obs);
 
   // 処理は簡潔に。
   mySystem.shaderReset(obs, "shader0");
+}
+
+function createEyePattern0(){
+  let eyes = [];
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 295, 0.85, 0.05));
+  eyes[0].setMoveFunc((eye) => {
+    eye.position.set(0.5 * Math.sin(TAU * eye.count / 360), 0.0);
+  });
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 180, 0.99, 0.35));
+  eyes[1].setMoveFunc((eye) => {
+    eye.position.set(-0.5, -0.3+0.3*Math.sin(TAU * eye.count / 360));
+  });
+  mySystem.registEyes(eyes);
 }
 
 // そのうち追加しやすくする・・tweenほしいわね
@@ -1027,40 +1144,58 @@ function room1(){
   mySystem.goalCheckThreshold = 1.0;
 
   // Eyes.
-  let eyes = [];
-  eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.55));
-  eyes[0].setMoveFunc((c, pos) => {
-    pos.set(-0.7, -0.5 * Math.sin(TAU * c / 360));
-  });
-  eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.65));
-  eyes[1].setMoveFunc((c, pos) => {
-    pos.set(0.7, 0.5 * Math.sin(TAU * c / 360));
-  });
-  mySystem.registEyes(eyes);
+  createEyePattern1();
 
   // Player.
   mySystem._player.initialize(-0.4, 0.8);
 
   // Obstacles.
   let obs = [];
+  /*
   obs.push(new RectObstacle(0, -11, 7, -9, 13));
   obs.push(new RectObstacle(1, -11, -13, -9, -7));
   obs.push(new RectObstacle(2, 9, 7, 11, 13));
   obs.push(new RectObstacle(3, 9, -13, 11, -7));
   obs.push(new SquareObstacle(4, 0, 0, 4));
+  */
+  obs.push(new RectObstacle(0, -10, 10, 0, 2, 6));
+  obs.push(new RectObstacle(1, -10, -10, 0, 2, 6));
+  obs.push(new RectObstacle(2, 10, 10, 0, 2, 6));
+  obs.push(new RectObstacle(3, 10, -10, 0, 2, 6));
+  obs.push(new SquareObstacle(4, 0, 0, 0, 4)); // 0追加
 
-  createWall(5, obs); // 壁を作る
+  createWall(obs.length, obs); // 壁を作る
+  mySystem.registObstacles(obs);
 
   // 処理は簡潔に。
   mySystem.shaderReset(obs, "shader1");
 }
 
+function createEyePattern1(){
+  let eyes = [];
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.55));
+  eyes[0].setMoveFunc((eye) => {
+    eye.position.set(-0.7, -0.5 * Math.sin(TAU * eye.count / 360));
+  });
+  eyes.push(new EnemyEye(0.0, 0.0, TAU / 200, 0.6, 0.65));
+  eyes[1].setMoveFunc((eye) => {
+    eye.position.set(0.7, 0.5 * Math.sin(TAU * eye.count / 360));
+  });
+  mySystem.registEyes(eyes);
+}
+
 // 外周を作るのは処理を再利用しましょうね
 function createWall(startIndex, obs){
+  /*
   obs.push(new RectObstacle(startIndex, -20, 19, 20, 20));
   obs.push(new RectObstacle(startIndex+1, -20, -20, -19, 20));
   obs.push(new RectObstacle(startIndex+2, 19, -20, 20, 20));
   obs.push(new RectObstacle(startIndex+3, -20, -20, 20, -19));
+  */
+  obs.push(new RectObstacle(startIndex, 0, 19.5, 0, 40, 1));
+  obs.push(new RectObstacle(startIndex+1, -19.5, 0, 0, 1, 40));
+  obs.push(new RectObstacle(startIndex+2, 19.5, 0, 0, 1, 40));
+  obs.push(new RectObstacle(startIndex+3, 0, -19.5, 0, 40, 1));
 }
 
 function createDistFuncDescription(obs){
@@ -1069,6 +1204,7 @@ function createDistFuncDescription(obs){
   for(let ob of obs){
     upperPart += ob.getString();
   }
+  console.log(upperPart);
   // 距離を返す部分
   let lowerPart = "  float result = 99999.0;";
   for(let i = 0; i < obs.length - (obs.length % 2); i += 2){
