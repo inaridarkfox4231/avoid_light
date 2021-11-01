@@ -379,11 +379,12 @@ function draw() {
 // 今考えてるのは「動かない：青」で「動く：赤」、黄色は動くときは当たるとアウト、止まってるときはダメージを受けない感じ。
 // 色変えるんだったらシェーダー側で変えるよりこっちでやった方がいい
 // と思う。あっちで色変えるの面倒だから。
-function movable(){
+//function movable(){
   // バウンドチェック
-  if(abs(nextPos.x) > 0.99 || abs(nextPos.y) > 0.99){ return false; }
-  return distFunction(nextPos) > 0.01;
-}
+//  if(abs(nextPos.x) > 0.99 || abs(nextPos.y) > 0.99){ return false; }
+//  return distFunction(nextPos) > 0.01;
+//}
+// もうこれ使われてないわよ
 
 // -------------------------------------------------------------------- //
 // particle.
@@ -544,6 +545,9 @@ class Obstacle{
   getString(){
     return "";
   }
+  setMoveFunc(func){
+    this.moveFunc = func;
+  }
   update(){
     this.moveFunc(this);
     this.count++;
@@ -685,7 +689,11 @@ class Player{
     // バウンドチェック
     // distFunctionはそのうちsystemからアクセスするように・・
     //if(abs(this.nextPosition.x) > 0.98 || abs(this.nextPosition.y) > 0.98){ return false; }
-    return distFunction(this.nextPosition) > 0.02;
+    let info = distFunction(this.nextPosition);
+    if(info.dist > 0.02){ return true; }
+    if(info.closest.isActive()){ this.changeLife(-99999); } // 動いてるなら即死. ここで死ぬフラグが立つわけね。
+    return false;
+    //return distFunction(this.nextPosition).dist > 0.02;
   }
   isAlive(){
     return this.alive;
@@ -798,7 +806,7 @@ class System{
     this.currentShader = undefined;
     this.lightShaders = {};
 
-    this.roomSet = [room0, room1, room2];
+    this.roomSet = [room2, room1, room0];
     this.roomNumber = 0; // ここが1とか2とかになるという・・
     this.floorPatternSeed = 0;
     this.defaultFloorAlpha = DEFAULT_FLOOR_ALPHA;
@@ -959,14 +967,28 @@ class System{
   }
   update(){
     this.eyes.loop("update");
-    this._player.update();
     this.obstacles.loop("update");
+    const ratio = this._player.getLifeRatio(); // あらかじめこれを記録しておかないとめんどくさいことになるので
+    this._player.update(); // というのもここで即死になった場合どんなライフで死んだのか分からないからね
+    if(!this._player.isAlive() && !this.killedFlag){
+      /*障害物にあたって死んだ場合はパーティクルをここで発生させる*/
+      this.createKnockDownParticle(ratio); // 力技。ごめんなさい。もっといい方法があればいいんだけど。
+    }
     for(let eye of this.eyes){ this.calcDamage(eye); }
     this._particleArray.loopReverse("update");
     this._particleArray.loopReverse("eject");
     this._properFrameCount++;
     this.clearCheck();
     this.gameOverCheck(); // fadeOut→initializeの流れ
+  }
+  createKnockDownParticle(ratio){
+    // this.createParticle(4 + this._player.getLifeRatio() * 316, 8, 6, 30, 4, 10);
+    //const ratio = this._player.getLifeRatio();
+    for(let x = 0; x < 320; x += 16){
+      //console.log(ratio);
+      if(x / 320 > ratio){ break; }
+      this.createParticle(x, 8, 6, 30, 4, 10);
+    }
   }
   clearCheck(){
     // プレイヤー生きててゴールに触れたならフェードアウトを開始して
@@ -1045,7 +1067,7 @@ class System{
     const cur = createVector(ePos.x, ePos.y);
     let d;
     for(let rep = 0; rep < 32; rep++){
-      d = distFunction(cur);
+      d = distFunction(cur).dist;
       if(d < THRESHOLD){ break; }
       cur.x += ray.x * d;
       cur.y += ray.y * d;
@@ -1362,7 +1384,15 @@ function room2(){
   obs.push(new RectObstacle(1, -10, -10, 0, 2, 6));
   obs.push(new RectObstacle(2, 10, 10, 0, 2, 6));
   obs.push(new RectObstacle(3, 10, -10, 0, 2, 6));
-  obs.push(new SquareObstacle(4, 0, 0, Math.PI/4, 4)); // 0追加
+  obs.push(new RectObstacle(4, -22, 10, 0, 2, 6));
+  obs.push(new RectObstacle(5, -22, -10, 0, 2, 6));
+  obs.push(new RectObstacle(6, 22, 10, 0, 2, 6));
+  obs.push(new RectObstacle(7, 22, -10, 0, 2, 6));
+
+  obs[4].activate();
+  obs[4].setMoveFunc((ob) => { const t = ob.count * TAU / 60; ob.setPosition((-20-2*cos(t))*GRID, 10*GRID); });
+
+  obs.push(new SquareObstacle(8, 0, 0, Math.PI/4, 4)); // 0追加
 
   createWall(obs.length, obs); // 壁を作る
   mySystem.registObstacles(obs);
@@ -1418,11 +1448,15 @@ function createDistFuncDescription(obs){
 function createDistFunction(obs){
   return (p) => {
     let d = 99999.0;
+    let closest = undefined;
     for(let ob of obs){
       const d1 = ob.getDist(p);
-      if(d1 < d){ d = d1; }
+      if(d1 < d){
+        d = d1;
+        closest = ob; // 一番近いやつ
+      }
     }
-    return d;
+    return {dist:d, closest:closest}; // distは距離でobはオブジェクト！
   }
 }
 
