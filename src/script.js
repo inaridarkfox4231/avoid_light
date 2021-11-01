@@ -74,7 +74,7 @@
 // floatをfloorって書いちゃって10分消えた（バカ）
 // しゅいさんの配信聴きながら作業してる（お絵描きしたい）
 
-const DEFAULT_FLOOR_ALPHA = 0.5; // 床をみえるようにする（テスト用）
+const DEFAULT_FLOOR_ALPHA = 0.0; // 床をみえるようにする（テスト用）
 const ROOMNUMBER_MAX = 3; // 2の場合0と1があるということです（以下略）
 const GRID = 0.05; // これを使って簡単に位置指定
 
@@ -642,6 +642,8 @@ class Player{
     this.maxLife = 60;
     this.life = this.maxLife;
     this.alive = true;
+    this.rest = 3;
+    this.maxRest = 3; // ゲームスタート時に初期化するんだけどね
   }
   initialize(x, y){
     this.position.set(x, y);
@@ -651,12 +653,21 @@ class Player{
     // ゲームオーバーの時だけ。
     this.life = this.maxLife;
   }
+  restReset(){
+    this.rest = this.maxRest;
+  }
   getLifeRatio(){
     return this.life / this.maxLife;
+  }
+  getRest(){
+    return this.rest;
   }
   changeLife(diff){
     this.life = constrain(this.life + diff, 0, this.maxLife);
     if(this.life === 0){ this.alive = false; } // 死んだ！
+  }
+  changeRest(diff){
+    this.rest = constrain(this.rest + diff, 0, this.maxRest);
   }
   update(){
     if(!this.alive){ return; } // 死んだ！
@@ -787,14 +798,14 @@ class System{
     this.currentShader = undefined;
     this.lightShaders = {};
 
-    this.roomSet = [room2, room1, room0];
+    this.roomSet = [room0, room1, room2];
     this.roomNumber = 0; // ここが1とか2とかになるという・・
     this.floorPatternSeed = 0;
     this.defaultFloorAlpha = DEFAULT_FLOOR_ALPHA;
     // ギミックで上げたりしたら面白そう
 
     this.clearFlag = false;
-    this.gameoverFlag = false;
+    this.killedFlag = false;
 
     // クリア判定はこのポイントに触れたときとする（大きさが）
     // つまり正方形に触れるのではなく中心にちゃんと来ないとだめ
@@ -840,11 +851,16 @@ class System{
   roomInitialize(nextRoomNumber = 0){
     this._fade.setFadeInFlag(true);
     this._properFrameCount = 0;
-    // ゲームオーバーならライフをリセット
-    // 最初に戻る場合も・・いっしょだから要らなくなってしまった（まあいいや）
-    if(this.gameoverFlag || nextRoomNumber === 0){ this._player.lifeReset(); }
+    // ここはちょっとややこしくなる
+    // まず残基が0でないならlifeResetするだけ
+    // 残基がゼロなら加えてRestも戻す
+    // クリアフラグが立ってるなら何もしない。
+    if(!this.clearFlag){
+      this._player.lifeReset();
+      if(this._player.getRest() == 0){ this._player.restReset(); }
+    }
     // フラグリセット
-    this.gameoverFlag = false;
+    this.killedFlag = false;
     this.clearFlag = false;
     // パーティクルが残らないように
     this._particleArray.clear();
@@ -998,17 +1014,21 @@ class System{
     // calcDamageは文字通りダメージを計算してHPに反映させるだけ
     // それが0になったらこっちでアウトの判定（というかaliveを
     // falseにする処理をplayer側で行う感じね）
-    // んでフェードアウトを開始してgameoverFlagをON
+    // んでフェードアウトを開始してkilledFlagをON
     // なおフラグを立てるのはその間になんかメッセージ出したいから
     // そして↓
     // プレイヤー死んでてfadeOut終わってたら戻す。
     if(this._player.isAlive()){ return; }
-    if(!this.gameoverFlag){
+    if(!this.killedFlag){
       this.kill();
-      this.gameoverFlag = true;
+      this.killedFlag = true;
     }else{
       if(!this._fade.getFadeOutFlag()){
-        this.roomInitialize(0); // ゲームオーバーの場合は最初に戻る
+        if(this._player.getRest() > 0){
+          this.roomInitialize(this.roomNumber); // 残基がある場合は同じところにとどまる
+        }else{
+          this.roomInitialize(0); // ゲームオーバーの場合は最初に戻る
+        }
       }
     }
     //if(!this._player.isAlive() && !this._fade.getFadeOutFlag()){
@@ -1018,7 +1038,7 @@ class System{
   calcDamage(eye){
     // クリアフラグが立ってるならダメージを受けないように
     // しないといけない
-    if(this.clearFlag || this.gameoverFlag){ return; }
+    if(this.clearFlag || this.killedFlag){ return; }
     const pPos = this._player.position;
     const ePos = eye.position;
     const ray = p5.Vector.sub(pPos, ePos).normalize();
@@ -1054,6 +1074,9 @@ class System{
     const q = getGlobalPosition(this._player.position);
     this.createParticle(q.x, q.y, 12, 60, 4, 40);
     //this.fadeOutCount = 1;
+    // 残基を減らす
+    this._player.changeRest(-1);
+    this.createParticle(width * 0.55 + 8 + 16 * (this._player.getRest()), 8, 12, 60, 4, 40);
     this._fade.setFadeOutFlag(true);
   }
   createParticle(x, y, _size, life, speed, count, r = 255, g = 255, b = 255){
@@ -1101,8 +1124,8 @@ class System{
     if(this._fade.getFadeInFlag()){
       gr.text("room" + this.roomNumber + ":caption this.", width * 0.5, height * 0.5);
     }
-    if(this.gameoverFlag){
-      gr.text("GAMEOVER...", width * 0.5, height * 0.5);
+    if(this.killedFlag && this._player.getRest() == 0){
+      gr.text("GAMEOVER...", width * 0.5, height * 0.5); // ゲームオーバーメッセージは残基ゼロの時だけ
     }
     if(this.clearFlag){
       gr.text("CLEAR!", width * 0.5, height * 0.5);
@@ -1110,6 +1133,10 @@ class System{
     if(this._player.isAlive()){
       const ratio = this._player.getLifeRatio();
       gr.image(this.lifeGaugeImg, 2, 2, 316 * ratio, 12, 0, 0, 320 * ratio, 16);
+    }
+    for(let i = 0; i < this._player.getRest(); i++){
+      gr.fill(0, 128, 255);
+      gr.circle(width * 0.55 + 8 + 16 * i, 8, 16);
     }
   }
 }
@@ -1166,6 +1193,29 @@ class Fade{
     if(this.fadeOutCount > this.fadeOutLimit){
       this.fadeOutReset();
     }
+  }
+}
+
+//
+class Result{
+  constructor(){
+    this.reset();
+  }
+  recordResult(_player){
+    this.cleared++;
+    this.totalTime += (performance.now() - this.lastRecordTime);
+    this.lifeRatio = _player.getLifeRatio();
+    this.rest = _player.getRest();
+  }
+  recordTime(){
+    this.lastRecordTime = performance.now();
+  }
+  reset(){
+    this.cleared = 0;
+    this.totalTime = 0;
+    this.lastRecordTime = 0;
+    this.lifeRatio = 0;
+    this.rest = 0;
   }
 }
 
