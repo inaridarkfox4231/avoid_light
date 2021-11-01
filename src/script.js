@@ -368,24 +368,6 @@ function draw() {
   //if(frameCount%30==0){ console.log((end-start)*60/1000); }
 }
 
-// ベクトルも不要に・・
-
-// 距離関数を移植。ステージごとにシェーダーの一部を書き換えて違うステージにするのもよさそう。所詮文字列なので。
-// 円や長方形をクラスにしてそれを使って判定させるとか。
-// 距離関数はパターン内部で作ることにしました！
-
-// 移動判定
-// 障害物が動く場合は当たったらやられるようにすれば良さそうだけど・・押される処理はめんどうなので難しい・・
-// 今考えてるのは「動かない：青」で「動く：赤」、黄色は動くときは当たるとアウト、止まってるときはダメージを受けない感じ。
-// 色変えるんだったらシェーダー側で変えるよりこっちでやった方がいい
-// と思う。あっちで色変えるの面倒だから。
-//function movable(){
-  // バウンドチェック
-//  if(abs(nextPos.x) > 0.99 || abs(nextPos.y) > 0.99){ return false; }
-//  return distFunction(nextPos) > 0.01;
-//}
-// もうこれ使われてないわよ
-
 // -------------------------------------------------------------------- //
 // particle.
 
@@ -688,21 +670,16 @@ class Player{
   movable(){
     // バウンドチェック
     // distFunctionはそのうちsystemからアクセスするように・・
-    //if(abs(this.nextPosition.x) > 0.98 || abs(this.nextPosition.y) > 0.98){ return false; }
     let info = distFunction(this.nextPosition);
     if(info.dist > 0.02){ return true; }
     if(info.closest.isActive()){ this.changeLife(-99999); } // 動いてるなら即死. ここで死ぬフラグが立つわけね。
     return false;
-    //return distFunction(this.nextPosition).dist > 0.02;
   }
   isAlive(){
     return this.alive;
   }
   draw(gr){
     if(!this.alive){ return; } // 死んだ！
-    //const sz = mySystem.getStageSize();
-    //const x = (this.position.x * width + sz.x) * 0.5;
-    //const y = (sz.y - this.position.y * height) * 0.5;
     const q = getGlobalPosition(this.position);
     gr.stroke(255);
     gr.strokeWeight(1);
@@ -765,9 +742,6 @@ class EnemyEye{
     this.count++;
   }
   draw(gr){
-    //const sz = mySystem.getStageSize();
-    //const ex = (this.position.x * width + sz.x) * 0.5;
-    //const ey = (sz.y - this.position.y * height) * 0.5;
     const e = getGlobalPosition(this.position);
     gr.translate(e.x, e.y);
     gr.rotate(-this.lightDirection); // tiがitになってた。。。馬鹿、、
@@ -806,7 +780,7 @@ class System{
     this.currentShader = undefined;
     this.lightShaders = {};
 
-    this.roomSet = [room2, room1, room0];
+    this.roomSet = [room0, room1, room2];
     this.roomNumber = 0; // ここが1とか2とかになるという・・
     this.floorPatternSeed = 0;
     this.defaultFloorAlpha = DEFAULT_FLOOR_ALPHA;
@@ -904,14 +878,7 @@ class System{
     return this.stageSize;
   }
   calcOffset(){
-    /*
-    const x = (this.position.x + 1.0) * 0.5 * width;
-    const y = (1.0 - this.position.y) * 0.5 * height;
-    */
-    //const p = this._player.position;
     const sz = this.getStageSize();
-    //const x = (p.x * width + sz.x) * 0.5;
-    //const y = (sz.y - p.y * height) * 0.5;
     const q = getGlobalPosition(this._player.position);
     const offsetX = constrain(q.x - width * 0.5, 0.0, sz.x - width);
     const offsetY = constrain(q.y - height * 0.5, 0.0, sz.y - height);
@@ -1009,13 +976,6 @@ class System{
         }
         if(cp.z === 0.0){ cleared = false; } // まだクリアしてない
       }
-      /*
-      if(mag(pos.x - this.goalPos.x, pos.y - this.goalPos.y) < this.goalCheckThreshold * GRID){
-        this.goalPos.z = 1;
-        this.clearFlag = true;
-        this._fade.setFadeOutFlag(true);
-      }
-      */
       // 全部1になったらゴールを出現させる
       if(cleared){
         this.goalPosition.z = 1.0;
@@ -1053,9 +1013,6 @@ class System{
         }
       }
     }
-    //if(!this._player.isAlive() && !this._fade.getFadeOutFlag()){
-    //  this.roomInitialize();
-    //}
   }
   calcDamage(eye){
     // クリアフラグが立ってるならダメージを受けないように
@@ -1088,11 +1045,6 @@ class System{
     }
   }
   kill(){
-    //this._player.alive = false;
-    //const pos = this._player.position;
-    //const sz = this.stageSize;
-    //const x = (pos.x * width + sz.x) * 0.5;
-    //const y = (sz.y - pos.y * height) * 0.5;
     const q = getGlobalPosition(this._player.position);
     this.createParticle(q.x, q.y, 12, 60, 4, 40);
     //this.fadeOutCount = 1;
@@ -1460,11 +1412,6 @@ function createDistFunction(obs){
   }
 }
 
-/*
-const sz = mySystem.getStageSize();
-const x = (this.position.x * width + sz.x) * 0.5;
-const y = (sz.y - this.position.y * height) * 0.5;
-*/
 // 同じ計算しまくってるので・・ステージ内での位置情報をキャンバス内での位置情報に変換する関数
 function getGlobalPosition(p){
   const sz = mySystem.getStageSize();
