@@ -1,112 +1,424 @@
-// これをもとに2DshaderTemplate充実させたいわね
+// もってきたよ～
 
-// 2Dにする
-// んでこれは図形を描かずに貼り付ける（光だけ）
+// --------------------------------------------------------------------------------------- //
+// Global.
 
-// 難しく考えなくていい。今あるこれを再現できるように
-// 少しずついじっていくだけ。
+let myGame; // ノード
+let mySystem; // システム
+let img0; // プレイヤー画像. 96x96で上、右、下、左がそれぞれの方向を向いている。真ん中はバタンキュー。
+// バタンキュー一瞬のあと消えても面白いかも。上：32,0,32,32 右：64,32,32,32 下：32,64,32,32 左：0,32,32,32
 
-// わーーーーーかーーーーんーーーーーないーーーーーーーーーーーーー
-// わかった。誤字（directionがdireciton）。よく見たら目玉動いてなかった。
-// 気付きにくいよねああいうのは・・・
-
-// グリッドにして床作ったり場所指定してもいいわね（グリッドの方が
-// 指定しやすいし）
-
-// grに落とした。これでスクロールの可能性・・まあやりませんが・・
-
-// 色はGLSLでいい気がしてきた。そっちのが速いんじゃないか。
-
-// SystemにdistFunction持たせてそんでplayerの場合はそこから
-// 取得するようにした方が簡単そう
-// eyeの動き方もそこで決めちゃうとか・・んー。あるいは
-// Systemの内部が重くなってしまうので
-// shaderのそういう部分も含めて別のとこで・・
-
-// ステージの構成要素
-// eyeのデータ（色、攻撃情報、移動情報）
-// プレイヤーの初期位置
-// ObstacleArray→距離関数、シェーダの距離関数部分作成
-// この3つを生成してステージを作る
-
-// さてと・・
-// そろそろGitHubに移行するかな。。
-// とりあえず枠組みはできた。あとは・・んー。
-// ゲージを用意する。長さは100くらいで。
-// 光に当たるとスリップダメージ。値は明るさそのまんまでいいと思う。
-// ゲージどこに置こう・・左上かなぁ。小さめに。
-
-// 敵のアイデアとしては特定の長方形の周りを周回するとか
-// そういうので
-// 画面の外周の2ヶ所を開けておいてそこを伝って次のステージに行くみたいな
-// しかし640,640だとすぐ終わっちゃいそう・・迷路っぽくするとか？
-// rectをたくさん用意するとかそういうの。
-
-// 周囲の壁を用意
-// 床を用意
-// 床は照らされたところだけ見えるようにする
-// 当然ゴールも見えない
-// って感じですかね・・
-// あとroundBoxとか追加したいわね。
-
-// なんか予想と違うけどいいや
-// 要するにモノクロが照らされて明るくなるイメージ？いいんじゃない？
-// ゴールが照らされて見えるようになるってわけね。
-
-// はい。
-// TODO大きく分けて3つ。
-// 1.ゴールして次のエリアに進む仕様を作る
-// 2.ダメージをスリップ仕様にする（MAX100とか120くらいでダメージは
-//   bltの値をそのまま使う感じ）
-// 3.room0とかroom1とかそこら辺の情報を左上に用意
-// こんなもんかな
-// 優先順位的に1→2→3、ていうか2と3は簡単でしょ・・
-
-// やっぱりデフォは0で・・見えちゃうと意味がないし。
-
-// 穴に落ちたらアニメーション、で、フェードアウト。
-// で、HPとかリセットして、roomのナンバーを進めて次のステージ作る。
-
-// チェックポイント複数用意してそれらを全部踏むとクリア、
-// 踏んだチェックポイントは光るようにするのもいいわね。
-// ステージ作りやすくしたいわね
-
-// floatをfloorって書いちゃって10分消えた（バカ）
-// しゅいさんの配信聴きながら作業してる（お絵描きしたい）
+// --------------------------------------------------------------------------------------- //
+// Constants.（各種定数）
 
 const DEFAULT_FLOOR_ALPHA = 0.0; // 床をみえるようにする（テスト用）
-const ROOMNUMBER_MAX = 3; // 2の場合0と1があるということです（以下略）
+//const ROOMNUMBER_MAX = 3; // 2の場合0と1があるということです（以下略）→廃止
 const GRID = 0.05; // これを使って簡単に位置指定
 
-// distFuncDescriptionを差し替えると異なるステージができる。
-// ステージチェンジの際にそれを行う。
-// それとは別にプレイヤーの初期位置とHPをリセットして
-// エネミーを配置して行動パターンを設定する。
+// キャンバスサイズ
+const CANVAS_W = 640;
+const CANVAS_H = 640;
 
-let mySystem;
+// 部屋数
+const MAX_ROOMID = 3; // 部屋の最大数
+const MAX_LEVELID = 3; // EASY, NORMAL, HARD.
 
-let img0; // プレイヤー. 96x96で上、右、下、左がそれぞれの方向を向いている。真ん中はバタンキュー。
-// バタンキュー一瞬のあと消えても面白いかも。上：32,0,32,32 右：64,32,32,32 下：32,64,32,32 左：0,32,32,32
+// KEYCODE定数
+// ああなるほど、これシステム側に書かないといけないんだ・・・
+
+const K_ENTER = 13;
+const K_RIGHT = 39;
+const K_LEFT = 37;
+const K_UP = 38;
+const K_DOWN = 40;
+const K_SPACE = 32;
+const K_SHIFT = 16; // シフトキー。
+const K_CTRL = 17; // コントロールキー。今回はこれをポーズに使う。
+
+const IS_ONPLAY = 0;
+const IS_ALLCLEAR = 1;
+const IS_GAMEOVER = 2;
+
+// --------------------------------------------------------------------------------------- //
+// preloading.
+// まあ基本的にはアセットを配置する形の方がいいんでしょうね。サンプル作るなら図形描画でいいんだけど。
 
 function preload(){
   img0 = loadImage("https://inaridarkfox4231.github.io/assets/charaImage/blackfox2.png");
 }
 
-function setup() {
-  createCanvas(640, 640);
-  mySystem = new System();
-  mySystem.roomInitialize();
+// --------------------------------------------------------------------------------------- //
+// Main.
+
+function setup(){
+  createCanvas(CANVAS_W, CANVAS_H);
+  //angleMode(DEGREES);
+  myGame = new Game();
+  myGame.createScenes(); // シーンを作る
 }
 
-function draw() {
-  const start = performance.now();
-
-  mySystem.update();
-  mySystem.draw();
-
-  const end = performance.now();
-  //if(frameCount%30==0){ console.log((end-start)*60/1000); }
+function draw(){
+  myGame.update();
+  myGame.draw();
+  myGame.shift();
 }
+
+// --------------------------------------------------------------------------------------- //
+// Game.（Sceneを統括する。切り替えなどを行う。）
+
+class Game{
+  constructor(){
+    this.scenes = {};
+    this.currentScene = undefined;
+  }
+  createScenes(){
+    // thisはnodeとして格納されすべてのSceneはnode経由で他のSceneを参照できる（必要に応じて）
+    this.scenes.title = new TitleScene(this);
+    this.scenes.play = new PlayScene(this);
+    //this.scenes.clear = new ClearScene(this);
+    //this.scenes.gameover = new GameoverScene(this);
+    this.scenes.pause = new PauseScene(this); // 一応、用意しといて。
+    this.scenes.result = new ResultScene(this);
+    this.currentScene = this.scenes.title;
+  }
+  getScene(sceneName){
+    if(sceneName === ""){ return undefined; }
+    return this.scenes[sceneName];
+  }
+  setScene(nextScene){
+    this.currentScene.setNextScene("");
+    nextScene.prepare(this.currentScene); // 次のSceneに準備をさせる
+    this.currentScene = nextScene;
+  }
+  update(){
+    this.currentScene.update();
+  }
+  draw(){
+    this.currentScene.draw();
+  }
+  shift(){
+    // シーンの切り替えは毎フレームdrawの直後に行う
+    const nextScene = this.currentScene.getNextScene();
+    if(nextScene !== undefined){
+      this.setScene(nextScene);
+    }
+  }
+}
+
+// --------------------------------------------------------------------------------------- //
+// Scene.
+
+class Scene{
+  constructor(_node){
+    this.node = _node;
+    this.name = "";
+    this.gr = createGraphics(CANVAS_W, CANVAS_H);
+    this.nextScene = undefined;
+  }
+  getName(){ return this.name; } // 名前は取得できた方がいいんじゃない？
+  getNextScene(){ return this.nextScene; }
+  setNextScene(sceneName){ this.nextScene = this.node.getScene(sceneName); }
+  prepare(_scene = undefined){ /* 遷移時に必ず実行される。前のシーンの情報を元に何かする */ }
+  keyAction(code){ /* キーイベント */}
+	update(){}
+	draw(){}
+}
+
+// --------------------------------------------------------------------------------------- //
+// TitleScene.
+
+class TitleScene extends Scene{
+  constructor(_node){
+    super(_node);
+    this.name = "title";
+    this.base = createGraphics(CANVAS_W, CANVAS_H);
+    this.gr.textAlign(CENTER, CENTER);
+    this.gr.textSize(min(CANVAS_W, CANVAS_H) * 0.04);
+    createTitleBase(this.base);
+    //this.btnSet = getButtonSetForSTG(); // ボタンセットを取得
+    this.buttonIndex = 0; // updateで更新される。エンターキーを押すときここが-1でないなら・・
+    this.prepare(); // ノードステートなので・・ロゴが入るならここには何も書かないかも。
+  }
+  prepare(_scene = undefined){
+    //createTitleBase(this.gr);
+    //this.btnSet.reset(); // リセットして大きさとか戻す
+    this.resetButtonIndex();
+  }
+  resetButtonIndex(){
+    this.buttonIndex = 0;
+  }
+  getButtonIndex(){
+    // play側で取得してどのステージにするのか決める感じ
+    return this.buttonIndex;
+  }
+  keyAction(code){
+    if(code === K_ENTER && this.buttonIndex >= 0){ this.setNextScene("play"); }
+    else if(code === K_DOWN){ this.buttonIndex = Math.min(this.buttonIndex + 1, MAX_LEVELID - 1); }
+    else if(code === K_UP){ this.buttonIndex = Math.max(this.buttonIndex - 1, 0); }
+  }
+  update(){
+    // タイトルアニメーションとかですかね。
+    // その場合背景とは別にイメージを用意してそっちを更新しつつレイヤーごとに描画ってなると思う。
+    // そっちをテンプレにすべきかどうか思案。というか背景が更新される形？んんん・・
+    //this.btnSet.getButtonIndex({id:this.buttonIndex});
+  }
+  draw(){
+    clear();
+    //this.btnSet.draw(this.gr);
+    const id = this.getButtonIndex();
+    this.gr.clear();
+    this.gr.image(this.base, 0, 0);
+    this.gr.text(id, CANVAS_W * 0.5, CANVAS_H * 0.8);
+    image(this.gr, 0, 0);
+  }
+}
+
+// --------------------------------------------------------------------------------------- //
+// Global functions for TitleScene.
+
+function createTitleBase(gr){
+  const SCALE = min(CANVAS_W, CANVAS_H);
+  gr.background(220);
+  gr.textSize(SCALE * 0.04);
+  gr.textAlign(CENTER, CENTER);
+  gr.fill(0);
+  gr.text("title", CANVAS_W * 0.5, CANVAS_H * 0.25);
+  gr.text("press enter...", CANVAS_W * 0.5, CANVAS_H * 0.35);
+}
+
+// --------------------------------------------------------------------------------------- //
+// PlayScene.
+
+class PlayScene extends Scene{
+  constructor(_node){
+    super(_node);
+    this.name = "play";
+    //this._system = createSystem(CANVAS_W, CANVAS_H, 1024);
+    this._system = new System();
+    mySystem = this._system; // 汚いやり方だけどね・・
+    //this._system.registBackgrounds(preload_bgs);
+    // ここでパターンを生成する感じ。
+    //this.generatePattern();
+  }
+  /*
+  generatePattern(){
+    // プレイヤーの武器を用意する。別コード。
+    this._system.createPlayer(getWeaponSeeds());
+
+    // ステージのデータを取得する。別コード。
+    let seeds = getPatternSeeds();
+    for(let seed of seeds){
+      this._system.addPatternSeed(seed);
+    }
+  }
+  */
+  prepare(_scene = undefined){
+    // タイトルからidを取得してレベル設定に使う。
+    if(_scene.getName() === "title"){
+      const level = _scene.getButtonIndex();
+      //this._system.setLevel(level);
+      this._system.initialize(level); // 0:EASY, 1:NORMAL, 2:HARD
+      //this._system.roomInitialize(0);
+    }
+
+    //const stageIndex = _scene.getButtonIndex();
+
+    //this._system.setPattern(stageIndex);
+  }
+  keyAction(code){
+    // ポーズ作ってから考えるね・・
+    //this.setNextScene(this._system.keyAction(code));
+  }
+  update(){
+    // 何か、する？
+    // thisを渡すのはシーンの遷移をさせるためではないかと（知るか）
+    this._system.update(this);
+    const flag = this._system.getShiftFlag();
+    // ここら辺のコードは再利用が効きそう
+    // もっとも次のステージに移る際とかは違う処理が必要かもだけど
+    if(flag === IS_ALLCLEAR || flag === IS_GAMEOVER){ this.setNextScene("result"); }
+    //if(flag === IS_GAMEOVER){ this.setNextScene("gameover"); }
+  }
+  draw(){
+    clear();
+    this._system.draw(this.gr);
+    image(this.gr, 0, 0);
+  }
+}
+
+// --------------------------------------------------------------------------------------- //
+// System.（PlaySceneの中身）
+// こちらに書くことはない。
+
+// --------------------------------------------------------------------------------------- //
+// PauseScene.
+// おいおいね・・・
+
+class PauseScene extends Scene{
+  constructor(_node){
+    super(_node);
+    this.name = "pause";
+  }
+  prepare(_scene = undefined){
+
+  }
+  keyAction(code){ /* キーイベント */}
+	update(){}
+	draw(){}
+}
+
+// --------------------------------------------------------------------------------------- //
+// ResultScene.
+// リザルトシーンですね～
+
+class ResultScene extends Scene{
+  constructor(_node){
+    super(_node);
+    this.name = "result";
+    this.base = createGraphics(CANVAS_W, CANVAS_H);
+    this.base.background(0);
+    this._result;
+  }
+  prepare(_scene = undefined){
+    // _sceneはplay一択なのでリザルト受け取るだけです
+    // とりあえずそれ表示するだけでいいから
+    const SCALE = min(CANVAS_W, CANVAS_H);
+    this.gr.textSize(SCALE * 0.06);
+    this.gr.fill(255);
+    this.gr.textAlign(CENTER, CENTER);
+    this._result = _scene._system.getResult();
+  }
+  keyAction(code){
+    // まあここはいいよね。
+    if(code === K_ENTER){ this.setNextScene("title"); }
+  }
+  update(){
+    // え？
+  }
+  draw(){
+    clear();
+    image(this.base, 0, 0);
+    this._result.draw(this.gr); // リザルトになんか描いてもらう
+    image(this.gr, 0, 0);
+  }
+}
+
+// --------------------------------------------------------------------------------------- //
+// ClearScene.
+// playから受け取った画像を・・んー。どうするかな。
+// わざわざ分ける必要ない？Systemのそのまま使ったうえで、グレーかけて文字表示するみたいなのでもいいかも。
+// つまりplayからsystemを譲り受けてそれそのまま描画したうえで・・
+// んー、いいや。文字表示するだけでいいや。そこまであっちには含めたくないからこっちで描画したいというわけ。
+/*
+class ClearScene extends Scene{
+  constructor(_node){
+    super(_node);
+    this.name = "clear";
+    this.grPlay = createGraphics(CANVAS_W, CANVAS_H);
+    this._system;
+  }
+  prepare(_scene = undefined){
+    // _sceneはplayで確定なのでsystemやgrなどを譲り受ける
+    // それを自らのgrに落としてそのうえでテキストを・・って感じ
+    const SCALE = min(CANVAS_W, CANVAS_H);
+    this.gr.textSize(SCALE * 0.06);
+    this.gr.fill(0);
+    this.gr.textAlign(CENTER, CENTER);
+    this.grPlay = _scene.gr;
+    this._system = _scene._system;
+  }
+  keyAction(code){
+    if(code === K_ENTER){ this.setNextScene("title"); }
+  }
+  clickAction(){
+  }
+  update(){
+    // 特に・・アニメーションあるなら？そういうのを？花火とか。
+    // プレイ画面におっかぶせるんだったら何かしたいよね。文字出すだけじゃなくて。おいおいね・・
+    this._system.update();
+  }
+  draw(){
+    clear();
+    this._system.draw(this.grPlay);
+    this.gr.image(this.grPlay, 0, 0);
+    this.gr.text("clear!", CANVAS_W * 0.5, CANVAS_H * 0.45);
+    this.gr.text("press enter...", CANVAS_W * 0.5, CANVAS_H * 0.55);
+    image(this.gr, 0, 0);
+  }
+}
+*/
+// --------------------------------------------------------------------------------------- //
+// GameoverScene.
+/*
+class GameoverScene extends Scene{
+  constructor(_node){
+    super(_node);
+    this.name = "gameover";
+    this.grPlay = createGraphics(CANVAS_W, CANVAS_H);
+    this._system;
+  }
+  prepare(_scene = undefined){
+    // だいたい同じような感じですかね・・変化を加えたいならなんかいじるかもだけど。
+    const SCALE = min(CANVAS_W, CANVAS_H);
+    this.gr.textSize(SCALE * 0.06);
+    this.gr.fill(0);
+    this.gr.textAlign(CENTER, CENTER);
+    this.grPlay = _scene.gr;
+    this._system = _scene._system;
+  }
+  keyAction(code){
+    if(code === K_ENTER){ this.setNextScene("title"); }
+  }
+  clickAction(){
+  }
+  update(){
+    // ゲームオーバー感を演出する何か・・まあ無くてもいい気も。
+    this._system.update();
+  }
+  draw(){
+    clear();
+    this._system.draw(this.grPlay);
+    this.gr.image(this.grPlay, 0, 0);
+    this.gr.text("gameover...", CANVAS_W * 0.5, CANVAS_H * 0.45);
+    this.gr.text("press enter!", CANVAS_W * 0.5, CANVAS_H * 0.55);
+    image(this.gr, 0, 0);
+  }
+}
+*/
+
+// --------------------------------------------------------------------------------------- //
+// Buttons.
+// ボタンは3つ。EASYとNORMALとHARDだけ。え？ランク？？何それ
+/*
+function getButtonSetForSTG(){
+  // ここで作る！！
+  const ox = 0;
+  const oy = 320;
+  const w = 480;
+  const h = 220;
+  let btnSet = new ButtonSet(ox, oy, w, h);
+  btnSet.registButton(new Button(30, 30, 120, 160));
+  btnSet.registButton(new Button(180, 30, 120, 160));
+  btnSet.registButton(new Button(330, 30, 120, 160));
+  return btnSet; // はやっ
+}
+*/
+// --------------------------------------------------------------------------------------- //
+// Interaction.（クリックやキー入力の関数）
+
+function keyPressed(){
+  myGame.currentScene.keyAction(keyCode);
+	return false;
+}
+/*
+function mouseClicked(){
+	myGame.currentScene.clickAction();
+	return false;
+}
+*/
+
+// 以下、システム関連。
+// ------------------------------------------------------------------------------------------------------------------------- //
 
 // ------------------------------------------------------------ //
 // obstacle.
@@ -302,6 +614,9 @@ class Player{
   getLifeRatio(){
     return this.life / this.maxLife;
   }
+  setMaxRest(n){
+    this.maxRest = n; // levelから設定
+  }
   getRest(){
     return this.rest;
   }
@@ -433,6 +748,9 @@ class System{
     this.eyes = new SimpleCrossReferenceArray();
     this._player = new Player();
 
+    // 遷移フラグ
+    this.shiftFlag = IS_ONPLAY;
+
     // シェーダー
     this.vsLight = getVertexShader();
     let fs = getFragmentShader();
@@ -464,9 +782,11 @@ class System{
 
     this.roomSet = [room0, room1, room2];
     this.roomNumber = 0; // ここが1とか2とかになるという・・
+    this.level = 0; // 0, 1, 2.
     this.floorPatternSeed = 0;
     this.defaultFloorAlpha = DEFAULT_FLOOR_ALPHA;
     // ギミックで上げたりしたら面白そう
+    this._result = new Result(); // リザルト
 
     this.clearFlag = false;
     this.killedFlag = false;
@@ -515,6 +835,14 @@ class System{
     this.distFunction = createDistFunction(obs);
     this.floorPatternSeed = Math.random() * 9999;
   }
+  initialize(level){
+    this.setLevel(level);
+    this._result.reset(); // リザルトをリセット
+    this._player.restReset();
+    this._player.lifeReset();
+    this.shiftFlag = IS_ONPLAY;
+    this.roomInitialize(0);
+  }
   roomInitialize(nextRoomNumber = 0){
     this._fade.setFadeInFlag(true);
     this._properFrameCount = 0;
@@ -522,10 +850,9 @@ class System{
     // まず残基が0でないならlifeResetするだけ
     // 残基がゼロなら加えてRestも戻す
     // クリアフラグが立ってるなら何もしない。
-    if(!this.clearFlag){
-      this._player.lifeReset();
-      if(this._player.getRest() == 0){ this._player.restReset(); }
-    }
+    if(this.killedFlag){ this._player.lifeReset(); }
+    //if(this._player.getRest() == 0){ this._player.restReset(); }
+
     this._player.imgReset(); // 画像はリセットする感じで
     // フラグリセット
     this.killedFlag = false;
@@ -535,6 +862,19 @@ class System{
     // パターンをセット
     this.roomNumber = nextRoomNumber;
     this.roomSet[this.roomNumber]();
+    // リザルトタイマー起動
+    this._result.timerOn();
+  }
+  setLevel(level){
+    this.level = level;
+    const r = [10, 6, 3]; // 雑だなおい
+    this._player.setMaxRest(r[level]);
+  }
+  getShiftFlag(){
+    return this.shiftFlag; // これを受け取って状態遷移する。いくつメソッド増えるんだ・・（p5よりは少ないから大丈夫（何が？？））
+  }
+  getResult(){
+    return this._result; // これをplaySceneに渡して経由してresultSceneさんに受け取ってもらう
   }
   registEyes(_eyes){
     // 目玉の情報を登録
@@ -574,7 +914,7 @@ class System{
     let sh = this.currentShader;
     sh.setUniform("u_resolution", [width, height]);
     sh.setUniform("u_stageSize", [this.stageSize.x, this.stageSize.y]); // ステージサイズ情報
-    sh.setUniform("u_count", this._properFrameCount);
+    sh.setUniform("u_count", this._properFrameCount); // 使ってないけどね・・ベルコン実装するなら使うわね。まだ未実装。まあ、残しておこう。
     sh.setUniform("u_eyeCount", 2);
 
     // eye関連
@@ -634,6 +974,7 @@ class System{
     this._properFrameCount++;
     this.clearCheck();
     this.gameOverCheck(); // fadeOut→initializeの流れ
+    // 上記二つのメソッドを終えた後のタイミングでフラグを取得するのでここで変えてしまえば問題は生じないはず。
   }
   createKnockDownParticle(ratio){
     // 動く障害物にKOされた場合のパーティクル発生処理
@@ -667,13 +1008,22 @@ class System{
         // ゴールに乗ったらクリア
         if(mag(pos.x - this.goalPosition.x, pos.y - this.goalPosition.y) < this.goalCheckThreshold * GRID){
           this.clearFlag = true;
+          // ここでリザルト更新
+          this._result.update(this._player); // プレイヤー情報を渡す
           this._fade.setFadeOutFlag(true);
         }
       }
     }else{
       if(!this._fade.getFadeOutFlag()){
         // 必要ならルームナンバーを増やす？1とかして。
-        this.roomInitialize((this.roomNumber + 1) % ROOMNUMBER_MAX);
+        this.roomNumber++;
+        if(this.roomNumber < MAX_ROOMID){
+          this.roomInitialize(this.roomNumber);
+        }else{
+          this.shiftFlag = IS_ALLCLEAR; // このあとInitializeしなくてもそのままresultいっちゃうのでOKです。
+          // リザルトの更新はクリアしたタイミングで行われるので問題ないです
+        }
+        //this.roomInitialize((this.roomNumber + 1) % ROOMNUMBER_MAX);
       }
     }
   }
@@ -695,7 +1045,8 @@ class System{
         if(this._player.getRest() > 0){
           this.roomInitialize(this.roomNumber); // 残基がある場合は同じところにとどまる
         }else{
-          this.roomInitialize(0); // ゲームオーバーの場合は最初に戻る
+          // this.roomInitialize(0); // ゲームオーバーの場合は最初に戻る
+          this.shiftFlag = IS_GAMEOVER; // ゲームオーバー、最初に戻らずリザルトへ。この場合最後にクリアした時のリザルトが使われる
         }
       }
     }
@@ -749,37 +1100,42 @@ class System{
     let newParticle = new Particle(x, y, size, _color, life, speed, count);
     this._particleArray.add(newParticle);
   }
-  draw(){
-    clear();
-    let gr = this.baseGraphic;
-    gr.background(0);
+  // 渡されたgrに描画するように修正
+  draw(gr){
+    gr.clear();
+    if(!(this.shiftFlag === IS_ONPLAY)){
+      gr.background(0); // 力技
+      return;
+    }
+    let base = this.baseGraphic;
+    base.background(0);
     this.setUniform();
     this._lightEffect.quad(-1, -1, -1, 1, 1, 1, 1, -1);
-    gr.image(this._lightEffect, 0, 0);
+    base.image(this._lightEffect, 0, 0);
     // lightEffectの一部をbaseGraphicに落とす。そのうえで、
     // offsetを考慮して目玉やプレイヤーを配置すればいい。
 
     // クリアした時に60フレーム掛けて消えるモーションやりたいのでちょっとね
     // クリアフラグが立っている場合に0～1の値を渡す感じで
     const prg = (this.clearFlag ? constrain(this._fade.getFadeOutProgress() * 2.0, 0.0, 1.0) : 0.0);
-    this._player.draw(gr, prg);
+    this._player.draw(base, prg);
 
-    this.eyes.loop("draw", [gr])
-    this._particleArray.loop("draw", [gr]);
+    this.eyes.loop("draw", [base])
+    this._particleArray.loop("draw", [base]);
 
-    this._fade.fadeIn(gr);
-    this._fade.fadeOut(gr);
+    this._fade.fadeIn(base);
+    this._fade.fadeOut(base);
 
     // フェードインの間にルームナンバー出した方がよさそうならその処理
     // クリアフラグやゲームオーバーフラグが立ってるならなんか出す
 
     //image(gr, 0, 0);
     const offset = this.calcOffset();
-    image(gr, 0, 0, width, height, offset.x, offset.y, width, height);
+    gr.image(base, 0, 0, width, height, offset.x, offset.y, width, height);
 
     this.drawInformation();
 
-    image(this.informationLayer, 0, 0);
+    gr.image(this.informationLayer, 0, 0);
   }
   drawInformation(){
     let gr = this.informationLayer;
@@ -974,7 +1330,8 @@ class Result{
   constructor(){
     this.reset();
   }
-  recordResult(_player){
+  // updateの方が分かりやすいのでupdateにしました
+  update(_player){
     this.cleared++; // クリアステージ数
     this.totalTime += (performance.now() - this.lastRecordTime); // トータルタイム
     this.lifeRatio = _player.getLifeRatio(); // ライフ割合
@@ -989,6 +1346,11 @@ class Result{
     this.lastRecordTime = 0;
     this.lifeRatio = 0;
     this.rest = 0;
+  }
+  draw(gr){
+    gr.clear();
+    gr.text("RESULT!!!!!", CANVAS_W * 0.5, CANVAS_H * 0.5);
+    gr.text("PRESS ENTER", CANVAS_W * 0.5, CANVAS_H * 0.6);
   }
 }
 
