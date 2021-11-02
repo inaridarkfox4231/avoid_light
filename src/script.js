@@ -351,6 +351,15 @@ let mySystem;
 
 let distFunction = () => {};
 
+let img0; // プレイヤー. 96x96で上、右、下、左がそれぞれの方向を向いている。真ん中はバタンキュー。
+// バタンキュー一瞬のあと消えても面白いかも。上：32,0,32,32 右：64,32,32,32 下：32,64,32,32 左：0,32,32,32
+let dx = [1,0,-1,0];
+let dy = [0,1,0,-1];
+
+function preload(){
+  img0 = loadImage("https://inaridarkfox4231.github.io/assets/charaImage/blackfox.png");
+}
+
 function setup() {
   createCanvas(640, 640);
   //noStroke();
@@ -622,6 +631,8 @@ class SquareObstacle extends Obstacle{
 // プレイヤー。十字キーとスペースキーで操作。
 class Player{
   constructor(){
+    this.img = createGraphics(32, 32);
+    this.allImg = img0;
     this.position = createVector();
     this.nextPosition = createVector();
     this.velocity = createVector(0, 0);
@@ -630,6 +641,10 @@ class Player{
     this.alive = true;
     this.rest = 3;
     this.maxRest = 3; // ゲームスタート時に初期化するんだけどね
+    this.createPlayerImage();
+  }
+  createPlayerImage(){
+    this.img.image(this.allImg, 0, 0, 32, 32, 32, 64, 32, 32);
   }
   initialize(x, y){
     this.position.set(x, y);
@@ -641,6 +656,10 @@ class Player{
   }
   restReset(){
     this.rest = this.maxRest;
+  }
+  imgReset(){
+    this.img.clear();
+    this.img.image(this.allImg, 0, 0, 32, 32, 32, 64, 32, 32);
   }
   getLifeRatio(){
     return this.life / this.maxLife;
@@ -659,19 +678,36 @@ class Player{
     if(!this.alive){ return; } // 死んだ！
     this.velocity.set(0.0, 0.0);
     const playerSpeed = (keyIsDown(32) ? 0.02 : 0.01);
-    if(keyIsDown(LEFT_ARROW)){ this.velocity.x = -playerSpeed; }
-    else if(keyIsDown(RIGHT_ARROW)){ this.velocity.x = playerSpeed; }
-    if(keyIsDown(UP_ARROW)){ this.velocity.y = playerSpeed; }
-    else if(keyIsDown(DOWN_ARROW)){ this.velocity.y = -playerSpeed; }
+    if(keyIsDown(LEFT_ARROW)){
+      //this.velocity.x = -playerSpeed;
+      this.setVelocity(2, playerSpeed);
+    }else if(keyIsDown(RIGHT_ARROW)){
+      //this.velocity.x = playerSpeed;
+      this.setVelocity(0, playerSpeed)
+    }
+    if(keyIsDown(UP_ARROW)){
+      //this.velocity.y = playerSpeed;
+      this.setVelocity(1, playerSpeed);
+    }else if(keyIsDown(DOWN_ARROW)){
+      //this.velocity.y = -playerSpeed;
+      this.setVelocity(3, playerSpeed);
+    }
     this.nextPosition.set(this.position.x + this.velocity.x, this.position.y + this.velocity.y);
     // nextPosが条件を満たすならば位置を更新
     if(this.movable()){ this.position.add(this.velocity); }
+  }
+  setVelocity(id, speed){
+    // idの0,1,2,3に応じてdxとdyに応じて速度を変更
+    this.velocity.x += dx[id] * speed;
+    this.velocity.y += dy[id] * speed;
+    this.img.clear();
+    this.img.image(this.allImg, 0, 0, 32, 32, 32 * (1 + dx[id]), 32 * (1 - dy[id]), 32, 32);
   }
   movable(){
     // バウンドチェック
     // distFunctionはそのうちsystemからアクセスするように・・
     let info = distFunction(this.nextPosition);
-    if(info.dist > 0.02){ return true; }
+    if(info.dist > 0.04){ return true; }
     if(info.closest.isActive()){ this.changeLife(-99999); } // 動いてるなら即死. ここで死ぬフラグが立つわけね。
     return false;
   }
@@ -681,14 +717,7 @@ class Player{
   draw(gr){
     if(!this.alive){ return; } // 死んだ！
     const q = getGlobalPosition(this.position);
-    gr.stroke(255);
-    gr.strokeWeight(1);
-    gr.noFill();
-    gr.circle(q.x, q.y, 20);
-    gr.strokeWeight(2);
-    gr.line(q.x-1,q.y,q.x-1,q.y-4);
-    gr.line(q.x+4,q.y,q.x+4,q.y-4);
-    gr.noStroke();
+    gr.image(this.img, q.x - 16, q.y - 16);
   }
 }
 
@@ -701,7 +730,7 @@ class Player{
 // lightRangeが増減したりとかしたら面白そう。
 class EnemyEye{
   constructor(x, y, rotSpeed, lRange, lHue){
-    this.img = createGraphics(40, 40);
+    this.img = createGraphics(32, 32);
     this.position = createVector(x, y);
     this.moveFunc = (eye) => {};
     this.lightDirection = 0;
@@ -720,18 +749,19 @@ class EnemyEye{
   }
   createEyeImage(){
     // そのうち画像貼り付けにするので今は適当で
+    // 32x32でリメイク
     this.img.noStroke();
     this.img.colorMode(HSB,100);
     this.img.fill(this.lightHue * 100, 100, 100);
-    this.img.circle(20, 20, 40);
+    this.img.circle(16, 16, 32);
     this.img.fill(100);
-    this.img.circle(32, 20, 16);
+    this.img.circle(25, 16, 14);
     this.img.fill(0);
-    this.img.circle(34, 20, 12);
+    this.img.circle(27, 16, 10);
     this.img.stroke(0);
     this.img.fill(100);
-    const t = PI / 6;
-    this.img.circle(34 + 4 * Math.cos(t), 20 + 4 * Math.sin(t), 4);
+    const t = -PI / 6;
+    this.img.circle(27 + 3 * Math.cos(t), 16 + 3 * Math.sin(t), 4);
     this.img.noStroke();
   }
   update(){
@@ -841,6 +871,7 @@ class System{
       this._player.lifeReset();
       if(this._player.getRest() == 0){ this._player.restReset(); }
     }
+    this._player.imgReset(); // 画像はリセットする感じで
     // フラグリセット
     this.killedFlag = false;
     this.clearFlag = false;
@@ -949,10 +980,8 @@ class System{
     this.gameOverCheck(); // fadeOut→initializeの流れ
   }
   createKnockDownParticle(ratio){
-    // this.createParticle(4 + this._player.getLifeRatio() * 316, 8, 6, 30, 4, 10);
-    //const ratio = this._player.getLifeRatio();
+    // 動く障害物にKOされた場合のパーティクル発生処理
     for(let x = 0; x < 320; x += 16){
-      //console.log(ratio);
       if(x / 320 > ratio){ break; }
       this.createParticle(x, 8, 6, 30, 4, 10);
     }
@@ -979,6 +1008,7 @@ class System{
       // 全部1になったらゴールを出現させる
       if(cleared){
         this.goalPosition.z = 1.0;
+        // ゴールに乗ったらクリア
         if(mag(pos.x - this.goalPosition.x, pos.y - this.goalPosition.y) < this.goalCheckThreshold * GRID){
           this.clearFlag = true;
           this._fade.setFadeOutFlag(true);
@@ -1341,7 +1371,7 @@ function room2(){
   obs.push(new RectObstacle(6, 22, 10, 0, 2, 6));
   obs.push(new RectObstacle(7, 22, -10, 0, 2, 6));
 
-  obs[4].activate();
+  obs[4].activate(); // ちょっと動かしましょうね
   obs[4].setMoveFunc((ob) => { const t = ob.count * TAU / 60; ob.setPosition((-20-2*cos(t))*GRID, 10*GRID); });
 
   obs.push(new SquareObstacle(8, 0, 0, Math.PI/4, 4)); // 0追加
