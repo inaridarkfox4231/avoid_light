@@ -182,8 +182,8 @@ function createTitleBase(gr){
   gr.textSize(SCALE * 0.04);
   gr.textAlign(CENTER, CENTER);
   gr.fill(0);
-  gr.text("title", CANVAS_W * 0.5, CANVAS_H * 0.25);
-  gr.text("press enter...", CANVAS_W * 0.5, CANVAS_H * 0.35);
+  gr.text("AVOID LIGHT", CANVAS_W * 0.5, CANVAS_H * 0.25);
+  gr.text("PRESS ENTER KEY", CANVAS_W * 0.5, CANVAS_H * 0.35);
 }
 
 // --------------------------------------------------------------------------------------- //
@@ -283,7 +283,7 @@ class ResultScene extends Scene{
     // _sceneはplay一択なのでリザルト受け取るだけです
     // とりあえずそれ表示するだけでいいから
     const SCALE = min(CANVAS_W, CANVAS_H);
-    this.gr.textSize(SCALE * 0.06);
+    this.gr.textSize(SCALE * 0.04);
     this.gr.fill(255);
     this.gr.textAlign(CENTER, CENTER);
     this._result = _scene._system.getResult();
@@ -1326,6 +1326,10 @@ function getGlobalPosition(p){
 
 // リザルトクラス（移植の際に結果表示するのに使う）
 // ステージ開始時に時間計測開始でクリアしたらストップ
+// んー？OKだよ。
+// たとえば0と1クリアして2でゲームオーバーの場合、0と1をどうやってクリアしたかの情報で判定するわけ。だから、
+// 1まで残基3でクリアした場合残基は3としてランクに登録されるよ。
+// ゲームオーバー時に残基0なのは当たり前なんでね・・ようやくここまで来ましたね、、（疲れた）
 class Result{
   constructor(){
     this.reset();
@@ -1349,8 +1353,11 @@ class Result{
   }
   draw(gr){
     gr.clear();
-    gr.text("RESULT!!!!!", CANVAS_W * 0.5, CANVAS_H * 0.5);
-    gr.text("PRESS ENTER", CANVAS_W * 0.5, CANVAS_H * 0.6);
+    gr.text("MAX CLEAR: " + this.cleared, CANVAS_W * 0.5, CANVAS_H * 0.3);
+    gr.text("TOTAL TIME: " + (this.totalTime / 1000).toFixed(3), CANVAS_W * 0.5, CANVAS_H * 0.4);
+    gr.text("LIFE RATIO:" + Math.floor(this.lifeRatio*100) + "%", CANVAS_W * 0.5, CANVAS_H * 0.5);
+    gr.text("REST: " + this.rest, CANVAS_W * 0.5, CANVAS_H * 0.6);
+    gr.text("PRESS ENTER", CANVAS_W * 0.5, CANVAS_H * 0.7);
   }
 }
 
