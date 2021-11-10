@@ -1083,7 +1083,7 @@ class System{
       // って思ったけど広い範囲を移動する際に面倒な・・ならないか。
       // 画面全体・・んー。
       this.createParticle(4 + this._player.getLifeRatio() * 316, 8, 6, 30, 4, 10);
-      this._player.changeLife(-damage); // 1ダメージで死ぬ
+      this._player.changeLife(-damage);
     }
   }
   kill(){
