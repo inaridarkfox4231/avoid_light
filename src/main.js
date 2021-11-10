@@ -35,6 +35,9 @@ const K_SPACE = 32;
 const K_SHIFT = 16; // シフトキー。
 const K_CTRL = 17; // コントロールキー。今回はこれをポーズに使う。
 
+const K_E = 69; // Eはポーズ中に押すとタイトルに戻る。
+const K_P = 80; // Pはプレイ中に押すとポーズ、さらに押すとプレイに戻る。
+
 const IS_ONPLAY = 0;
 const IS_ALLCLEAR = 1;
 const IS_GAMEOVER = 2;
@@ -134,6 +137,7 @@ class TitleScene extends Scene{
     this.base = createGraphics(CANVAS_W, CANVAS_H);
     this.gr.textAlign(CENTER, CENTER);
     this.gr.textSize(min(CANVAS_W, CANVAS_H) * 0.04);
+    this.gr.fill(255);
     createTitleBase(this.base);
     //this.btnSet = getButtonSetForSTG(); // ボタンセットを取得
     this.buttonIndex = 0; // updateで更新される。エンターキーを押すときここが-1でないなら・・
@@ -168,7 +172,8 @@ class TitleScene extends Scene{
     const id = this.getButtonIndex();
     this.gr.clear();
     this.gr.image(this.base, 0, 0);
-    this.gr.text(id, CANVAS_W * 0.5, CANVAS_H * 0.8);
+		const levelText = ["EASY", "NORMAL", "HARD"];
+    this.gr.text(levelText[id], CANVAS_W * 0.5, CANVAS_H * 0.8);
     image(this.gr, 0, 0);
   }
 }
@@ -178,12 +183,15 @@ class TitleScene extends Scene{
 
 function createTitleBase(gr){
   const SCALE = min(CANVAS_W, CANVAS_H);
-  gr.background(220);
+  gr.background(0);
   gr.textSize(SCALE * 0.04);
   gr.textAlign(CENTER, CENTER);
-  gr.fill(0);
+  gr.fill(255);
   gr.text("AVOID LIGHT", CANVAS_W * 0.5, CANVAS_H * 0.25);
   gr.text("PRESS ENTER KEY", CANVAS_W * 0.5, CANVAS_H * 0.35);
+  gr.text("level change: up/down arrow key.", CANVAS_W * 0.5, CANVAS_H * 0.5);
+	gr.text("player control: arrow key.", CANVAS_W * 0.5, CANVAS_H * 0.58);
+	gr.text("player speed up: space key.", CANVAS_W * 0.5, CANVAS_H * 0.66);
 }
 
 // --------------------------------------------------------------------------------------- //
@@ -193,37 +201,15 @@ class PlayScene extends Scene{
   constructor(_node){
     super(_node);
     this.name = "play";
-    //this._system = createSystem(CANVAS_W, CANVAS_H, 1024);
     this._system = new System();
     mySystem = this._system; // 汚いやり方だけどね・・
-    //this._system.registBackgrounds(preload_bgs);
-    // ここでパターンを生成する感じ。
-    //this.generatePattern();
   }
-  /*
-  generatePattern(){
-    // プレイヤーの武器を用意する。別コード。
-    this._system.createPlayer(getWeaponSeeds());
-
-    // ステージのデータを取得する。別コード。
-    let seeds = getPatternSeeds();
-    for(let seed of seeds){
-      this._system.addPatternSeed(seed);
-    }
-  }
-  */
   prepare(_scene = undefined){
     // タイトルからidを取得してレベル設定に使う。
     if(_scene.getName() === "title"){
       const level = _scene.getButtonIndex();
-      //this._system.setLevel(level);
       this._system.initialize(level); // 0:EASY, 1:NORMAL, 2:HARD
-      //this._system.roomInitialize(0);
     }
-
-    //const stageIndex = _scene.getButtonIndex();
-
-    //this._system.setPattern(stageIndex);
   }
   keyAction(code){
     // ポーズ作ってから考えるね・・
@@ -237,7 +223,6 @@ class PlayScene extends Scene{
     // ここら辺のコードは再利用が効きそう
     // もっとも次のステージに移る際とかは違う処理が必要かもだけど
     if(flag === IS_ALLCLEAR || flag === IS_GAMEOVER){ this.setNextScene("result"); }
-    //if(flag === IS_GAMEOVER){ this.setNextScene("gameover"); }
   }
   draw(){
     clear();
@@ -247,24 +232,44 @@ class PlayScene extends Scene{
 }
 
 // --------------------------------------------------------------------------------------- //
-// System.（PlaySceneの中身）
-// こちらに書くことはない。
+// System関連.（PlaySceneの中身）
 
-// --------------------------------------------------------------------------------------- //
 // PauseScene.
-// おいおいね・・・
+// とりあえずPボタンで移行できるようにするとかね
 
 class PauseScene extends Scene{
   constructor(_node){
     super(_node);
     this.name = "pause";
+    this.base = createGraphics(CANVAS_W, CANVAS_H);
+    this.properFrameCount = 0;
   }
   prepare(_scene = undefined){
-
+    this.base.clear();
+    this.base.image(_scene.gr);
+    this.base.background(0, 128);
+    this.gr.textSize(min(CANVAS_W, CANVAS_H) * 0.04);
+    this.gr.textAlign(CENTER, CENTER);
+    this.properFrameCount = 0;
   }
-  keyAction(code){ /* キーイベント */}
-	update(){}
-	draw(){}
+  keyAction(code){
+    /* キーイベント */
+    // P KEYで解除、E KEYでタイトルに戻る。タイトルに戻る場合すべてリセットになるわけ。
+    // そうはいっても特にやることはないです。最初にinitializeをすればいいだけなので。
+  }
+	update(){
+    this.properFrameCount++;
+  }
+	draw(){
+    image(this.base, 0, 0);
+    this.gr.clear();
+    const prg = (this.properFrameCount % 120) / 120;
+    const alpha = 128 * (1 + cos(prg * TAU));
+    this.gr.fill(255, alpha);
+    this.gr.text("PAUSE", CANVAS_W * 0.5, CANVAS_H * 0.45);
+    this.gr.text("START: PRESS P KEY", CANVAS_W * 0.5, CANVAS_H * 0.5);
+    this.gr.text("TITLE: PRESS E KEY", CANVAS_W * 0.5, CANVAS_H * 0.55);
+  }
 }
 
 // --------------------------------------------------------------------------------------- //
@@ -815,7 +820,7 @@ class System{
     // いろいろ設定
     gr.noStroke();
     gr.textSize(24);
-    gr.textAlign(CENTER, CENTER);
+    //gr.textAlign(CENTER, CENTER); // はいはいタイム出さないとね
     let gauge = this.lifeGaugeImg;
     gauge.colorMode(HSB, 100);
     gauge.noStroke();
@@ -862,7 +867,7 @@ class System{
     // パターンをセット
     this.roomNumber = nextRoomNumber;
     this.roomSet[this.roomNumber]();
-    // リザルトタイマー起動
+    // リザルトタイマー起動（実行されるのはそのプレイの中で最初にその部屋に入った時だけとなるようにコードを修正）
     this._result.timerOn();
   }
   setLevel(level){
@@ -1141,6 +1146,7 @@ class System{
     let gr = this.informationLayer;
     gr.clear();
     gr.fill(255);
+    gr.textAlign(CENTER, CENTER);
     if(this._fade.getFadeInFlag()){
       gr.text("room" + this.roomNumber + ":caption this.", width * 0.5, height * 0.5);
     }
@@ -1154,6 +1160,8 @@ class System{
       const ratio = this._player.getLifeRatio();
       gr.image(this.lifeGaugeImg, 2, 2, 316 * ratio, 12, 0, 0, 320 * ratio, 16);
     }
+    gr.textAlign(LEFT, TOP);
+    gr.text((this._result.getCurrentElapsedTime(this.clearFlag) / 1000).toFixed(3), 2, 20);
     for(let i = 0; i < this._player.getRest(); i++){
       gr.fill(0, 128, 255);
       gr.circle(width * 0.55 + 8 + 16 * i, 8, 16);
@@ -1330,6 +1338,8 @@ function getGlobalPosition(p){
 // たとえば0と1クリアして2でゲームオーバーの場合、0と1をどうやってクリアしたかの情報で判定するわけ。だから、
 // 1まで残基3でクリアした場合残基は3としてランクに登録されるよ。
 // ゲームオーバー時に残基0なのは当たり前なんでね・・ようやくここまで来ましたね、、（疲れた）
+// 時間返すやり方について
+// とはいえ記録されるのはクリア時です。ゲームオーバーの場合以下略
 class Result{
   constructor(){
     this.reset();
@@ -1340,9 +1350,11 @@ class Result{
     this.totalTime += (performance.now() - this.lastRecordTime); // トータルタイム
     this.lifeRatio = _player.getLifeRatio(); // ライフ割合
     this.rest = _player.getRest(); // 残基数
+    this.roomInFlag = false;
   }
   timerOn(){
-    this.lastRecordTime = performance.now();
+    if(!this.roomInFlag){ this.lastRecordTime = performance.now(); }
+    this.roomInFlag = true; // 部屋の中でやり直している間はタイマーリセットしません継続継続！！
   }
   reset(){
     this.cleared = 0;
@@ -1350,14 +1362,25 @@ class Result{
     this.lastRecordTime = 0;
     this.lifeRatio = 0;
     this.rest = 0;
+    this.roomInFlag = false; // 部屋に入りましたのフラグ。これがないとやられるたびにタイムが戻っちゃうので。
+  }
+  getCurrentElapsedTime(clearFlag = false){
+    // あ、そうか、これだめだ。えーと・・・
+    // ていうか計測の仕方自体に問題があるね・・あくまでもステージスタートからタイマーストップまでの時間の累積、
+    // いやそうなってるよ。
+    // totalTimeか！！
+    // 未クリア時は this.totalTime + performance.now() - this.lastRecordTimeでいいと。で、
+    // そうでないときは this.totalTimeでいいよ。
+    if(clearFlag){ return this.totalTime; }
+    return this.totalTime + performance.now() - this.lastRecordTime;
   }
   draw(gr){
     gr.clear();
-    gr.text("MAX CLEAR: " + this.cleared, CANVAS_W * 0.5, CANVAS_H * 0.3);
-    gr.text("TOTAL TIME: " + (this.totalTime / 1000).toFixed(3), CANVAS_W * 0.5, CANVAS_H * 0.4);
-    gr.text("LIFE RATIO:" + Math.floor(this.lifeRatio*100) + "%", CANVAS_W * 0.5, CANVAS_H * 0.5);
-    gr.text("REST: " + this.rest, CANVAS_W * 0.5, CANVAS_H * 0.6);
-    gr.text("PRESS ENTER", CANVAS_W * 0.5, CANVAS_H * 0.7);
+    gr.text("Cleared: " + this.cleared, CANVAS_W * 0.5, CANVAS_H * 0.3);
+    gr.text("Total elapsed time: " + (this.totalTime / 1000).toFixed(3) + "seconds", CANVAS_W * 0.5, CANVAS_H * 0.4);
+    gr.text("Life ratio:" + Math.floor(this.lifeRatio*100) + "%", CANVAS_W * 0.5, CANVAS_H * 0.5);
+    gr.text("Rest: " + this.rest, CANVAS_W * 0.5, CANVAS_H * 0.6);
+    gr.text("PRESS ENTER", CANVAS_W * 0.5, CANVAS_H * 0.75);
   }
 }
 
