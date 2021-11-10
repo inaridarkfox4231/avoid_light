@@ -593,6 +593,7 @@ class Player{
     this.velocity = createVector(0, 0);
     this.maxLife = 60;
     this.life = this.maxLife;
+    this.damage = 0; // ダメージ保持用
     this.alive = true;
     this.rest = 3;
     this.maxRest = 3; // ゲームスタート時に初期化するんだけどね
@@ -625,29 +626,35 @@ class Player{
   getRest(){
     return this.rest;
   }
-  changeLife(diff){
-    this.life = constrain(this.life + diff, 0, this.maxLife);
-    if(this.life === 0){ this.alive = false; } // 死んだ！
-  }
   changeRest(diff){
     this.rest = constrain(this.rest + diff, 0, this.maxRest);
+  }
+  registDamage(dmg){
+    // ダメージを蓄積させる
+    this.damage += dmg;
+  }
+  calcDamage(){
+    // ダメージを清算し、0なら死んだことにする
+    this.life = constrain(this.life - this.damage, 0, this.maxLife); // ダメージを計算
+    if(this.life === 0){ this.alive = false; } // 死んだ！
+    this.damage = 0; // リセットしましょう
+  }
+  getDamageRatio(){
+    // 最大ライフに対するダメージの割合
+    return Math.min(this.damage, this.life) / this.maxLife;
   }
   update(){
     if(!this.alive){ return; } // 死んだ！
     this.velocity.set(0.0, 0.0);
     const playerSpeed = (keyIsDown(32) ? 0.02 : 0.01);
     if(keyIsDown(LEFT_ARROW)){
-      //this.velocity.x = -playerSpeed;
       this.setVelocity(2, playerSpeed);
     }else if(keyIsDown(RIGHT_ARROW)){
-      //this.velocity.x = playerSpeed;
       this.setVelocity(0, playerSpeed)
     }
     if(keyIsDown(UP_ARROW)){
-      //this.velocity.y = playerSpeed;
       this.setVelocity(1, playerSpeed);
     }else if(keyIsDown(DOWN_ARROW)){
-      //this.velocity.y = -playerSpeed;
       this.setVelocity(3, playerSpeed);
     }
     this.nextPosition.set(this.position.x + this.velocity.x, this.position.y + this.velocity.y);
@@ -668,7 +675,10 @@ class Player{
     // distFunctionはそのうちsystemからアクセスするように・・
     let info = mySystem.getDistInfo(this.nextPosition);
     if(info.dist > 0.04){ return true; }
-    if(info.closest.isActive()){ this.changeLife(-99999); } // 動いてるなら即死. ここで死ぬフラグが立つわけね。
+    if(info.closest.isActive()){
+      // 動いてるなら即死.
+      this.registDamage(99999);
+    }
     return false;
   }
   isAlive(){
@@ -966,14 +976,15 @@ class System{
   update(){
     this.eyes.loop("update");
     this.obstacles.loop("update");
-    const ratio = this._player.getLifeRatio(); // あらかじめこれを記録しておかないとめんどくさいことになるので
-    // （クリアフラグが立っているときはプレイヤーを動かさないのもありかも）
-    if(!this.clearFlag){ this._player.update(); }// というのもここで即死になった場合どんなライフで死んだのか分からないからね
-    if(!this._player.isAlive() && !this.killedFlag){
-      /*障害物にあたって死んだ場合はパーティクルをここで発生させる*/
-      this.createKnockDownParticle(ratio); // 力技。ごめんなさい。もっといい方法があればいいんだけど。
-    }
-    for(let eye of this.eyes){ this.calcDamage(eye); }
+
+    if(!this.clearFlag){ this._player.update(); } // クリアフラグが立ってなければプレイヤーを動かす、ダメージも入る可能性
+    for(let eye of this.eyes){ this.calcEyeLightDamage(eye); } // EyeLightによるダメージ計算処理
+    // 他、何らかのダメージ計算処理が入る可能性
+    // もしかしたらアイテムかセーブポイントか何かで回復するかもしれない
+
+    this.createDamageParticle(); // ダメージによるパーティクル表示
+    this._player.calcDamage(); // ダメージ清算（死亡判定含む）
+
     this._particleArray.loopReverse("update");
     this._particleArray.loopReverse("eject");
     this._properFrameCount++;
@@ -981,10 +992,12 @@ class System{
     this.gameOverCheck(); // fadeOut→initializeの流れ
     // 上記二つのメソッドを終えた後のタイミングでフラグを取得するのでここで変えてしまえば問題は生じないはず。
   }
-  createKnockDownParticle(ratio){
-    // 動く障害物にKOされた場合のパーティクル発生処理
-    for(let x = 0; x < 320; x += 16){
-      if(x / 320 > ratio){ break; }
+  createDamageParticle(){
+    // ゲージを32分割してライフの位置からスタートして1/32ずつとんで発生させていく感じ
+    // わかる？？
+    const lifeRatio = this._player.getLifeRatio();
+    const damageRatio = this._player.getDamageRatio();
+    for(let x = 320 * lifeRatio; x > 320 * (lifeRatio - damageRatio); x -= 10){
       this.createParticle(x, 8, 6, 30, 4, 10);
     }
   }
@@ -1028,7 +1041,6 @@ class System{
           this.shiftFlag = IS_ALLCLEAR; // このあとInitializeしなくてもそのままresultいっちゃうのでOKです。
           // リザルトの更新はクリアしたタイミングで行われるので問題ないです
         }
-        //this.roomInitialize((this.roomNumber + 1) % ROOMNUMBER_MAX);
       }
     }
   }
@@ -1050,13 +1062,12 @@ class System{
         if(this._player.getRest() > 0){
           this.roomInitialize(this.roomNumber); // 残基がある場合は同じところにとどまる
         }else{
-          // this.roomInitialize(0); // ゲームオーバーの場合は最初に戻る
           this.shiftFlag = IS_GAMEOVER; // ゲームオーバー、最初に戻らずリザルトへ。この場合最後にクリアした時のリザルトが使われる
         }
       }
     }
   }
-  calcDamage(eye){
+  calcEyeLightDamage(eye){
     // クリアフラグが立ってるならダメージを受けないように
     // しないといけない
     if(this.clearFlag || this.killedFlag){ return; }
@@ -1076,14 +1087,8 @@ class System{
     const lVector = createVector(Math.cos(lDir), Math.sin(lDir));
     const lRange = eye.lightRange;
     if(p5.Vector.dist(cur, ePos) > l && p5.Vector.dot(ray, lVector) > lRange && this._player.isAlive()){
-      //this.kill(); // 殺す処理
-      const damage = Math.exp(-l*l/3.0) * eye.getAttackFactor(); // 攻撃力を考慮
-      // パーティクル発生
-      // プレイヤーのは地味だから要らないや。ゲージだけ減らそう。で、個別だと面倒だからそのまま使う・・感じで。
-      // って思ったけど広い範囲を移動する際に面倒な・・ならないか。
-      // 画面全体・・んー。
-      this.createParticle(4 + this._player.getLifeRatio() * 316, 8, 6, 30, 4, 10);
-      this._player.changeLife(-damage);
+      const dmg = Math.exp(-l*l/3.0) * eye.getAttackFactor(); // 攻撃力を考慮
+      this._player.registDamage(dmg); // ここではダメージだけ計算。
     }
   }
   kill(){
@@ -1872,3 +1877,6 @@ function createDistFunction(obs){
     return {dist:d, closest:closest}; // distは距離でobはオブジェクト！
   }
 }
+
+// -------------------------------------------------------------------------------------------------- //
+// 動き関連のクラス
