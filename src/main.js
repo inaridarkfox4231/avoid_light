@@ -17,7 +17,7 @@ const GRID = 0.05; // これを使って簡単に位置指定
 
 // キャンバスサイズ
 const CANVAS_W = 640;
-const CANVAS_H = 640;
+const CANVAS_H = 640; // 360にしないとだね・・・
 
 // 部屋数
 const MAX_ROOMID = 3; // 部屋の最大数
